@@ -9,9 +9,9 @@ local Mouse = LocalPlayer:GetMouse()
 local Toggle_Keys = {
 	Highlight = {Key = Enum.KeyCode.Z, Enabled = false},
 	AimBot = {Key = Enum.KeyCode.X, Enabled = false},
-	Click = {Key = Enum.KeyCode.L, Enabled = false},
-	Disable = {Key = Enum.KeyCode.P},
-	Rejoin = {Key = Enum.KeyCode.Minus}
+	Click = {Key = Enum.KeyCode.C, Enabled = false},    
+	Disable = {Key = Enum.KeyCode.Minus},
+	Rejoin = {Key = Enum.KeyCode.Plus} 
 }
 
 local function IsSameTeam(Player1, Player2)
@@ -97,16 +97,16 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 
 	if input.KeyCode == Toggle_Keys.AimBot.Key then
-		Toggle_Keys.AimBot.Enabled = not Toggle_Keys.AimBot.Enabled
+		Toggle_Keys.AimBot.Enabled = not Toggle_Keys.AimBot.Enabled print(Toggle_Keys.AimBot.Enabled)
 	end
 
 	if input.KeyCode == Toggle_Keys.Highlight.Key then
-		Toggle_Keys.Highlight.Enabled = not Toggle_Keys.Highlight.Enabled
+		Toggle_Keys.Highlight.Enabled = not Toggle_Keys.Highlight.Enabled print(Toggle_Keys.Highlight.Enabled)
 		ToggleHighlights(Toggle_Keys.Highlight.Enabled)
 	end
 
 	if input.KeyCode == Toggle_Keys.Click.Key then
-		Toggle_Keys.Click.Enabled = not Toggle_Keys.Click.Enabled
+		Toggle_Keys.Click.Enabled = not Toggle_Keys.Click.Enabled print(Toggle_Keys.Click.Enabled)
 		OnCLick(Toggle_Keys.Click.Enabled)
 	end
 

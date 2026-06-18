@@ -9,7 +9,7 @@ local Mouse = LocalPlayer:GetMouse()
 local Toggle_Keys = {
 	Highlight = {Key = Enum.KeyCode.Z, Enabled = false},
 	AimBot = {Key = Enum.KeyCode.X, Enabled = false},
-	Click = {Key = Enum.KeyCode.C, Enabled = false},    
+	Click = {Key = Enum.KeyCode.L, Enabled = false},    
 	Disable = {Key = Enum.KeyCode.Minus},
 	Rejoin = {Key = Enum.KeyCode.Plus} 
 }

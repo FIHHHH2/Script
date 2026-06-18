@@ -124,42 +124,53 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 RunService.Heartbeat:Connect(function()
-	if not Toggle_Keys.AimBot.Enabled then return end
+    if not Toggle_Keys.AimBot.Enabled then return end
 
-	local PlayersTable = {}
-	local LocalCharacter = LocalPlayer.Character
-	if not LocalCharacter then return end
+    local PlayersTable = {}
+    local LocalCharacter = LocalPlayer.Character
+    if not LocalCharacter then return end
 
-	local LocalRootPart = LocalCharacter:FindFirstChild("HumanoidRootPart") or LocalCharacter:FindFirstChild("Torso")
-	if not LocalRootPart then return end
+    -- Check if the Local Player is alive
+    local LocalHumanoid = LocalCharacter:FindFirstChildOfClass("Humanoid")
+    if not LocalHumanoid or LocalHumanoid.Health <= 0 then return end
 
-	for _, Player in Players:GetPlayers() do
-		if Player ~= LocalPlayer and Player.Character then
-			local Character = Player.Character
-			local RootPart = Character:FindFirstChild("Head") -- AnyBody Part
-			if RootPart and not IsSameTeam(LocalPlayer, Player) then
-				local IgnoreList = {LocalCharacter, Character}
-				if IsVisible(LocalRootPart.Position, RootPart.Position, IgnoreList) then
-					PlayersTable[Character] = RootPart.CFrame
-				end
-			end
-		end
-	end
+    local LocalRootPart = LocalCharacter:FindFirstChild("HumanoidRootPart") or LocalCharacter:FindFirstChild("Torso")
+    if not LocalRootPart then return end
 
-	local ClosestCFrame = nil
-	local ShortestDistance = math.huge
+    for _, Player in Players:GetPlayers() do
+        if Player ~= LocalPlayer and Player.Character then
+            local Character = Player.Character
+            
+            -- Check if the target player is alive
+            local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+            if Humanoid and Humanoid.Health > 0 then
+                
+                local RootPart = Character:FindFirstChild("Head") -- Any Body Part
+                if RootPart and not IsSameTeam(LocalPlayer, Player) then
+                    local IgnoreList = {LocalCharacter, Character}
+                    if IsVisible(LocalRootPart.Position, RootPart.Position, IgnoreList) then
+                        PlayersTable[Character] = RootPart.CFrame
+                    end
+                end
+                
+            end
+        end
+    end
 
-	for Character, CFrame in PlayersTable do
-		local Distance = (LocalRootPart.Position - CFrame.Position).Magnitude
-		if Distance < ShortestDistance then
-			ShortestDistance = Distance
-			ClosestCFrame = CFrame
-		end
-	end
+    local ClosestCFrame = nil
+    local ShortestDistance = math.huge
 
-	-- Pivot the camera to the closest CFrame
-	if ClosestCFrame then
-		local Camera = workspace.CurrentCamera
-		Camera.CFrame = CFrame.new(Camera.CFrame.Position, ClosestCFrame.Position)
-	end
+    for Character, CFrame in pairs(PlayersTable) do
+        local Distance = (LocalRootPart.Position - CFrame.Position).Magnitude
+        if Distance < ShortestDistance then
+            ShortestDistance = Distance
+            ClosestCFrame = CFrame
+        end
+    end
+
+    -- Pivot the camera to the closest CFrame
+    if ClosestCFrame then
+        local Camera = workspace.CurrentCamera
+        Camera.CFrame = CFrame.new(Camera.CFrame.Position, ClosestCFrame.Position)
+    end
 end)

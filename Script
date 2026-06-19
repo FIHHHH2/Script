@@ -1,176 +1,190 @@
-local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
 
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
-local Toggle_Keys = {
-	Highlight = {Key = Enum.KeyCode.Z, Enabled = false},
-	AimBot = {Key = Enum.KeyCode.X, Enabled = false},
-	Click = {Key = Enum.KeyCode.L, Enabled = false},    
-	Disable = {Key = Enum.KeyCode.Minus},
-	Rejoin = {Key = Enum.KeyCode.Plus} 
+-- Wait for character to load
+local PlayerCharacter = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+local Bindings = {
+    ESP = { Key = Enum.KeyCode.Z, Boolean = false },
+    AimLock = { Key = Enum.KeyCode.X, Boolean = false },
+    InfJump = { Key = Enum.KeyCode.C, Boolean = false },
 }
 
+-- Helper Functions
 local function IsSameTeam(Player1, Player2)
-	if not Player1.Neutral or not Player2.Neutral then
-		return Player1.Team and Player2.Team and Player1.Team == Player2.Team
-	end
-	return false
+    if not Player1.Neutral or not Player2.Neutral then
+        return Player1.Team and Player2.Team and Player1.Team == Player2.Team
+    end
+    return false
 end
 
 local function IsVisible(Origin, Target, IgnoreList)
-	local RaycastParams = RaycastParams.new()
-	RaycastParams.FilterDescendantsInstances = IgnoreList
-	RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    local RaycastParams = RaycastParams.new()
+    RaycastParams.FilterDescendantsInstances = IgnoreList
+    RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
 
-	local Direction = (Target - Origin).Unit
-	local Distance = (Target - Origin).Magnitude
-	local RaycastResult = workspace:Raycast(Origin, Direction * Distance, RaycastParams)
+    local Direction = (Target - Origin).Unit
+    local Distance = (Target - Origin).Magnitude
+    local RaycastResult = workspace:Raycast(Origin, Direction * Distance, RaycastParams)
 
-	return not RaycastResult
+    return not RaycastResult
 end
 
-local function AddHighlight(Char)
-	if Char:IsA("Model") and Char:FindFirstChild("Humanoid") then
-		if not Char:FindFirstChild("Highlight") then
-			local New_Highlight = Instance.new("Highlight", Char)
-			New_Highlight.FillTransparency = 0.5
-			New_Highlight.FillColor = Color3.fromRGB(20, 255, 196)
-			New_Highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-			New_Highlight.Enabled = true
-		end
-	end
+-- Infinite Jump
+local function PlatformFallOff(BasePart)
+    task.spawn(function()
+        while task.wait() and Bindings.InfJump.Boolean do
+            BasePart.Position -= Vector3.new(0, 0.45, 0)
+        end
+    end)
 end
 
-local function ToggleHighlights(Enable)
-	for _, Char in workspace:GetDescendants() do
-		if Char:IsA("Model") and Char:FindFirstChild("Humanoid") then
-			local Player = Players:GetPlayerFromCharacter(Char)
-			if Player and not IsSameTeam(LocalPlayer, Player) then
-				local Highlight = Char:FindFirstChild("Highlight")
-				if Highlight then
-					Highlight.Enabled = Enable
-				else
-					AddHighlight(Char)
-				end
-			end
-		end
-	end
+local function InfiniteJump()
+    if not Bindings.InfJump.Boolean then return end
+
+    local RightFoot = PlayerCharacter:FindFirstChild("RightFoot") or PlayerCharacter:FindFirstChild("Right Leg")
+    if not RightFoot then return end
+
+    local NewPlatform = Instance.new("Part", workspace)
+    NewPlatform.Anchored = true
+    NewPlatform.Transparency = 0.85
+    NewPlatform.Size = Vector3.new(3, 0.5, 3)
+    NewPlatform.CanCollide = true
+
+    local FootPosition = RightFoot.Position - Vector3.new(0, RightFoot.Size.Y / 2, 0)
+    NewPlatform.Position = FootPosition
+
+    PlatformFallOff(NewPlatform)
+    Debris:AddItem(NewPlatform, 5)
 end
 
-local function OnCLick(Enabled)
-	Mouse.Button1Down:Connect(function()
-		local Target = Mouse.Target
-		if Target ~= nil then
-			if not Target:IsA("BasePart") or Target:IsA("MeshPart") then end
-			if Target.Locked == true then end
-			if Target.CanCollide == true then
-				Target.CanCollide = false
-			else
-				Target.CanCollide = true
-			end
-		end
-	end)
+-- ESP
+
+local function ApplyHighlight(character)
+    local Humanoid = character:FindFirstChild("Humanoid")
+    if not Humanoid or Humanoid.Health <= 0 then return end
+    if character:FindFirstChild("Highlight") then return end
+
+    local highlight = Instance.new("Highlight")
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    highlight.FillColor = Color3.fromRGB(7, 71, 127)
+    highlight.OutlineColor = Color3.fromRGB(255, 247, 0)
+    highlight.Enabled = Bindings.ESP.Boolean
+    highlight.Parent = character
 end
 
-local function DeleteHighlights()
-	for _, Character in workspace:GetDescendants() do
-		if Character:IsA("Model") and Character:FindFirstChild("Humanoid") then
-			local Highlight = Character:FindFirstChild("Highlight")
-			if Highlight then
-				Highlight:Destroy()
-			end
-		end
-	end
+local function ToggleHighlights()
+    for _, player in ipairs(Players:GetPlayers()) do
+        local character = player.Character
+        if character then
+            local Humanoid = character:FindFirstChild("Humanoid")
+            if not Humanoid or Humanoid.Health <= 0 then continue end
+
+            local highlight = character:FindFirstChild("Highlight")
+            if highlight then
+                highlight.Enabled = Bindings.ESP.Boolean
+            else
+                ApplyHighlight(character)
+            end
+        end
+    end
 end
 
-workspace.ChildAdded:Connect(AddHighlight)
-for _, Player in Players:GetPlayers() do
-	local Character = Player:FindFirstChild("Character")
-	if Character then AddHighlight(Character) end
+-- Apply ESP to existing and new players
+for _, player in ipairs(Players:GetPlayers()) do
+    if player.Character then
+        local Humanoid = player.Character:FindFirstChild("Humanoid")
+        if Humanoid and Humanoid.Health > 0 then
+            ApplyHighlight(player.Character)
+        end
+    end
+    player.CharacterAdded:Connect(function(character)
+        local Humanoid = character:FindFirstChild("Humanoid")
+        if Humanoid and Humanoid.Health > 0 then
+            ApplyHighlight(character)
+            ToggleHighlights()
+        end
+    end)
 end
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-
-	if input.KeyCode == Toggle_Keys.AimBot.Key then
-		Toggle_Keys.AimBot.Enabled = not Toggle_Keys.AimBot.Enabled print(Toggle_Keys.AimBot.Enabled)
-	end
-
-	if input.KeyCode == Toggle_Keys.Highlight.Key then
-		Toggle_Keys.Highlight.Enabled = not Toggle_Keys.Highlight.Enabled print(Toggle_Keys.Highlight.Enabled)
-		ToggleHighlights(Toggle_Keys.Highlight.Enabled)
-	end
-
-	if input.KeyCode == Toggle_Keys.Click.Key then
-		Toggle_Keys.Click.Enabled = not Toggle_Keys.Click.Enabled print(Toggle_Keys.Click.Enabled)
-		OnCLick(Toggle_Keys.Click.Enabled)
-	end
-
-	if input.KeyCode == Toggle_Keys.Disable.Key then
-		Toggle_Keys.Highlight.Enabled = false
-		Toggle_Keys.AimBot.Enabled = false
-		ToggleHighlights(false)
-		DeleteHighlights()
-		script:Destroy()
-	end
-
-	if input.KeyCode == Toggle_Keys.Rejoin.Key then
-		TeleportService:Teleport(game.PlaceId, LocalPlayer)
-	end
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(character)
+        local Humanoid = character:FindFirstChild("Humanoid")
+        if Humanoid and Humanoid.Health > 0 then
+            ApplyHighlight(character)
+            ToggleHighlights()
+        end
+    end)
 end)
 
+-- AimLock
 RunService.Heartbeat:Connect(function()
-    if not Toggle_Keys.AimBot.Enabled then return end
+    if not Bindings.AimLock.Boolean then return end
 
-    local PlayersTable = {}
     local LocalCharacter = LocalPlayer.Character
     if not LocalCharacter then return end
-
-    -- Check if the Local Player is alive
-    local LocalHumanoid = LocalCharacter:FindFirstChildOfClass("Humanoid")
-    if not LocalHumanoid or LocalHumanoid.Health <= 0 then return end
 
     local LocalRootPart = LocalCharacter:FindFirstChild("HumanoidRootPart") or LocalCharacter:FindFirstChild("Torso")
     if not LocalRootPart then return end
 
-    for _, Player in Players:GetPlayers() do
-        if Player ~= LocalPlayer and Player.Character then
-            local Character = Player.Character
-            
-            -- Check if the target player is alive
-            local Humanoid = Character:FindFirstChildOfClass("Humanoid")
-            if Humanoid and Humanoid.Health > 0 then
-                
-                local RootPart = Character:FindFirstChild("Head") -- Any Body Part
-                if RootPart and not IsSameTeam(LocalPlayer, Player) then
-                    local IgnoreList = {LocalCharacter, Character}
-                    if IsVisible(LocalRootPart.Position, RootPart.Position, IgnoreList) then
-                        PlayersTable[Character] = RootPart.CFrame
-                    end
+    local PlayersTable = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local character = player.Character
+            local Humanoid = character:FindFirstChild("Humanoid")
+            local Head = character:FindFirstChild("Head")
+
+            -- Skip if the player is dead (Health <= 0) or has no Humanoid
+            if not Humanoid or Humanoid.Health <= 0 then continue end
+
+            if Head and not IsSameTeam(LocalPlayer, player) then
+                local IgnoreList = {LocalCharacter, character}
+                if IsVisible(LocalRootPart.Position, Head.Position, IgnoreList) then
+                    PlayersTable[character] = Head.CFrame
                 end
-                
             end
         end
     end
 
+    -- Rest of the AimLock logic remains the same
     local ClosestCFrame = nil
     local ShortestDistance = math.huge
 
-    for Character, CFrame in pairs(PlayersTable) do
-        local Distance = (LocalRootPart.Position - CFrame.Position).Magnitude
-        if Distance < ShortestDistance then
-            ShortestDistance = Distance
-            ClosestCFrame = CFrame
+    for character, cframe in PlayersTable do
+        local distance = (LocalRootPart.Position - cframe.Position).Magnitude
+        if distance < ShortestDistance then
+            ShortestDistance = distance
+            ClosestCFrame = cframe
         end
     end
 
-    -- Pivot the camera to the closest CFrame
     if ClosestCFrame then
         local Camera = workspace.CurrentCamera
         Camera.CFrame = CFrame.new(Camera.CFrame.Position, ClosestCFrame.Position)
+    end
+end)
+-- Input Handling
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    if input.KeyCode == Bindings.InfJump.Key then
+        Bindings.InfJump.Boolean = not Bindings.InfJump.Boolean
+        print("Infinite Jump:", Bindings.InfJump.Boolean)
+    elseif input.KeyCode == Bindings.ESP.Key then
+        Bindings.ESP.Boolean = not Bindings.ESP.Boolean
+        ToggleHighlights()
+        print("ESP:", Bindings.ESP.Boolean)
+    elseif input.KeyCode == Bindings.AimLock.Key then
+        Bindings.AimLock.Boolean = not Bindings.AimLock.Boolean
+        print("AimLock:", Bindings.AimLock.Boolean)
+    elseif input.KeyCode == Enum.KeyCode.Space and Bindings.InfJump.Boolean then
+        InfiniteJump()
     end
 end)

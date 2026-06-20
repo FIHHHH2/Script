@@ -8,12 +8,10 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
-
 local GUI_NAME = "JailbreakBountyMenu"
 local ESP_FOLDER_NAME = "JailbreakBountyESP"
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
-
 -- Clean up existing connections
 if _G.JailbreakESP_Connections then
     for _, conn in ipairs(_G.JailbreakESP_Connections) do
@@ -27,31 +25,31 @@ if _G.JailbreakESP_Connections then
     end
 end
 _G.JailbreakESP_Connections = {}
-
 local function addConnection(conn)
     table.insert(_G.JailbreakESP_Connections, conn)
 end
-
 -- Clean up existing GUI and ESP folder
 local oldGui = CoreGui:FindFirstChild(GUI_NAME)
 if oldGui then oldGui:Destroy() end
-
 local oldESP = CoreGui:FindFirstChild(ESP_FOLDER_NAME)
 if oldESP then oldESP:Destroy() end
-
 -- ===================== STATE =====================
 local espEnabled = true
 local infiniteJumpEnabled = false
-
 -- Player Properties
 local customWalkSpeed = 16
 local noSlowEnabled = false
-
 -- Vehicle
 local carSpeedMult = 1.0
 local carHeightOffset = 0.0
 local carTurnSpeedMult = 1.0
-
+local boatSpeedMult = 1.0
+local boatDriveOnLand = false
+local infiniteBoostEnabled = false
+local carFlightEnabled = false
+local carFlightSpeed = 100
+local audioVolumeMultiplier = 1.0
+local soundOrigVolumes = setmetatable({}, { __mode = "k" })
 -- Aimbot
 local aimbotEnabled = false
 local aimbotFOV = 120
@@ -62,26 +60,23 @@ local aimbotIgnoreTeam = true
 local aimbotIgnoreArrested = true
 local aimbotShowFOV = true
 local aimbotCurrentTarget = nil
-
 -- Weapon Modifiers
 local weaponConfigBackup = {}
 local weaponModifiers = {
     fastFire = false,
-    maxAmmo = false,
+    infiniteAmmo = false,
     instaReload = false,
     noSpread = false,
     noRecoil = false,
     autoFire = false,
     fastBullets = false
 }
-
 -- Auto Features
 local autoArrestEnabled = false
 local autoRobEnabled = false
 local autoDoorsEnabled = false
 local autoArrestRange = 15
 local autoRobRange = 20
-
 -- Cached module references (lazy-loaded)
 local _cachedUIModule = nil
 local _cachedDoorUtils = nil
@@ -89,7 +84,6 @@ local _cachedDoorConsts = nil
 local _cachedHandcuffsConfig = nil
 local _cachedArrestZoneSystem = nil
 local _cachedSettings = nil
-
 -- FOV Circle
 local fovCircle = Drawing and Drawing.new("Circle") or nil
 if fovCircle then
@@ -101,7 +95,6 @@ if fovCircle then
     fovCircle.Transparency = 0.7
     fovCircle.Visible = false
 end
-
 -- ===================== MODULE HELPERS =====================
 local function getUIModule()
     if _cachedUIModule then return _cachedUIModule end
@@ -114,7 +107,6 @@ local function getUIModule()
     end
     return nil
 end
-
 local function getDoorUtils()
     if _cachedDoorUtils then return _cachedDoorUtils end
     local success, result = pcall(function()
@@ -126,7 +118,6 @@ local function getDoorUtils()
     end
     return nil
 end
-
 local function getDoorConsts()
     if _cachedDoorConsts then return _cachedDoorConsts end
     local success, result = pcall(function()
@@ -138,7 +129,6 @@ local function getDoorConsts()
     end
     return nil
 end
-
 local function getHandcuffsConfig()
     if _cachedHandcuffsConfig then return _cachedHandcuffsConfig end
     pcall(function()
@@ -152,7 +142,6 @@ local function getHandcuffsConfig()
     end)
     return _cachedHandcuffsConfig
 end
-
 local function getSettings()
     if _cachedSettings then return _cachedSettings end
     pcall(function()
@@ -161,12 +150,10 @@ local function getSettings()
     end)
     return _cachedSettings
 end
-
 -- ===================== ESP =====================
 local espFolder = Instance.new("Folder")
 espFolder.Name = ESP_FOLDER_NAME
 espFolder.Parent = CoreGui
-
 local function getBountyColor(bounty)
     if bounty <= 0 then
         return Color3.fromRGB(0, 255, 127)
@@ -178,7 +165,6 @@ local function getBountyColor(bounty)
         return Color3.fromRGB(255, 0, 80)
     end
 end
-
 local function getBounties()
     local bounties = {}
     local bountyDataObj = ReplicatedStorage:FindFirstChild("BountyData")
@@ -196,11 +182,9 @@ local function getBounties()
     end
     return bounties
 end
-
 local function setupCharacter(player, char)
     local hrp = char:WaitForChild("HumanoidRootPart", 5)
     if not hrp then return end
-
     local highlight = espFolder:FindFirstChild(player.Name .. "_Highlight")
     if not highlight then
         highlight = Instance.new("Highlight")
@@ -210,7 +194,6 @@ local function setupCharacter(player, char)
         highlight.Parent = espFolder
     end
     highlight.Adornee = char
-
     local billboard = espFolder:FindFirstChild(player.Name .. "_Billboard")
     if not billboard then
         billboard = Instance.new("BillboardGui")
@@ -219,7 +202,6 @@ local function setupCharacter(player, char)
         billboard.Size = UDim2.new(0, 200, 0, 50)
         billboard.StudsOffset = Vector3.new(0, 3, 0)
         billboard.Parent = espFolder
-
         local label = Instance.new("TextLabel")
         label.Name = "Label"
         label.BackgroundTransparency = 1
@@ -232,7 +214,6 @@ local function setupCharacter(player, char)
     end
     billboard.Adornee = hrp
 end
-
 local function createESP(player)
     if player == LocalPlayer then return end
     if player.Character then
@@ -243,33 +224,27 @@ local function createESP(player)
     end)
     addConnection(conn)
 end
-
 local function removeESP(player)
     local highlight = espFolder:FindFirstChild(player.Name .. "_Highlight")
     if highlight then highlight:Destroy() end
     local billboard = espFolder:FindFirstChild(player.Name .. "_Billboard")
     if billboard then billboard:Destroy() end
 end
-
 local function clearAllESP()
     espFolder:ClearAllChildren()
 end
-
 local function updateESP()
     if not espEnabled then
         clearAllESP()
         return
     end
-
     local bounties = getBounties()
     local localChar = LocalPlayer.Character
     local localHrp = localChar and localChar:FindFirstChild("HumanoidRootPart")
-
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             local highlight = espFolder:FindFirstChild(player.Name .. "_Highlight")
             local billboard = espFolder:FindFirstChild(player.Name .. "_Billboard")
-
             if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
                 if not highlight or not billboard then
                     setupCharacter(player, player.Character)
@@ -277,7 +252,6 @@ local function updateESP()
                     billboard = espFolder:FindFirstChild(player.Name .. "_Billboard")
                 end
             end
-
             if highlight then
                 highlight.Enabled = true
                 local bounty = bounties[player.Name] or 0
@@ -285,7 +259,6 @@ local function updateESP()
                 highlight.FillColor = color
                 highlight.OutlineColor = color
             end
-
             if billboard then
                 billboard.Enabled = true
                 local label = billboard:FindFirstChild("Label")
@@ -293,7 +266,6 @@ local function updateESP()
                     local bounty = bounties[player.Name] or 0
                     local color = getBountyColor(bounty)
                     label.TextColor3 = color
-
                     local distStr = ""
                     if localHrp and player.Character then
                         local targetHrp = player.Character:FindFirstChild("HumanoidRootPart")
@@ -302,7 +274,6 @@ local function updateESP()
                             distStr = string.format(" [%d studs]", distance)
                         end
                     end
-
                     if bounty > 0 then
                         label.Text = string.format("%s%s\nBounty: $%d", player.Name, distStr, bounty)
                     else
@@ -313,7 +284,6 @@ local function updateESP()
         end
     end
 end
-
 -- ===================== INFINITE JUMP =====================
 local function toggleInfiniteJump(state)
     infiniteJumpEnabled = state
@@ -331,7 +301,6 @@ local function toggleInfiniteJump(state)
         end)
     end
 end
-
 -- ===================== PLAYER MOVEMENT UPDATE =====================
 local function updatePlayerMovement()
     local character = LocalPlayer.Character
@@ -344,7 +313,6 @@ local function updatePlayerMovement()
                 isCrawling = require(CharacterUtil).IsCrawling
             end)
         end
-
         if not isCrawling then
             if noSlowEnabled then
                 if humanoid.WalkSpeed < customWalkSpeed then
@@ -356,13 +324,17 @@ local function updatePlayerMovement()
         end
     end
 end
-
 -- ===================== VEHICLE =====================
 local function updateVehicle()
     local VehicleUtilsObj = ReplicatedStorage:FindFirstChild("VehicleUtils", true)
     if not VehicleUtilsObj then return end
     pcall(function()
         local VehicleUtils = require(VehicleUtilsObj)
+        -- Infinite Boost / Nitro
+        if infiniteBoostEnabled and VehicleUtils.nitroState then
+            VehicleUtils.nitroState.Nitro = VehicleUtils.nitroState.NitroLastMax or 250
+            VehicleUtils.nitroState.NitroForceUIUpdate = true
+        end
         local packet = VehicleUtils.GetLocalVehiclePacket()
         if packet then
             if not packet._origHeight then
@@ -380,7 +352,220 @@ local function updateVehicle()
         end
     end)
 end
-
+-- Hook boat/jetski systems
+local function hookVehicles()
+    pcall(function()
+        -- 1. Hook Boat class
+        local BoatModObj = ReplicatedStorage:FindFirstChild("Game", true)
+        local BoatMod = BoatModObj and BoatModObj:FindFirstChild("Boat") and BoatModObj.Boat:FindFirstChild("Boat")
+        if BoatMod then
+            local Boat = require(BoatMod)
+            local origBoatUpdatePhysics = Boat.UpdatePhysics
+            Boat.UpdatePhysics = function(self)
+                local p1 = self
+                local v1 = p1:GetAreTiresPopped()
+                local BuoyancySensor = p1.BuoyancySensor
+                if not BuoyancySensor then
+                    local BuoyancySensor2 = Instance.new("BuoyancySensor")
+                    BuoyancySensor2.Parent = p1.PartBase
+                    p1.BuoyancySensor = BuoyancySensor2
+                    p1.maid.sensor = BuoyancySensor2
+                    BuoyancySensor = BuoyancySensor2
+                end
+                local TouchingSurface = BuoyancySensor.TouchingSurface
+                
+                -- Drive on land forces AlignOrientation to be enabled
+                p1.AlignOrientation.Enabled = TouchingSurface or boatDriveOnLand
+                local v2 = p1.PartBase.CFrame
+                local v3 = v2:VectorToObjectSpace(p1.PartBase.Velocity)
+                local v6 = Vector3.new(0, 0, -p1.SpringAccelp * (if p1.SpringAccelp > 0 then p1.Config.SpeedForward else p1.Config.SpeedForward * 0.5))
+                if v1 then
+                    v6 = v6 * 0.05
+                end
+                -- Boat speed multiplier + land friction bypass
+                if not TouchingSurface then
+                    if boatDriveOnLand then
+                        v6 = v6 * boatSpeedMult
+                    else
+                        v6 = v6 * 0.25 * boatSpeedMult
+                    end
+                else
+                    v6 = v6 * boatSpeedMult
+                end
+                p1.Force.Force = v6 * p1.PartBase.AssemblyMass * 10 + -Vector3.new(v3.X * 3, 0, v3.Z * (p1.Config.FrictionFwd or 0.05) + v3.Z * math.abs(v3.Z) * 0.001) * p1.PartBase.AssemblyMass
+                local v13 = math.clamp(-v2:VectorToObjectSpace(p1.PartBase.RotVelocity).Y / 0.5, -1, 1)
+                local v15 = math.clamp(-v3.z / 80, -1, 1) * 0.8 + p1.SpringAccelp * 0.2
+                local v24 = math.clamp(1 - (p1.Config.TurnCurveCoeff or 1) * math.sqrt((math.clamp((math.abs(-v3.Z) - 100) / 800, 0, 1))), 0.05, 1) * (p1.SpringHeadingp * math.pi * p1.Config.MaximumTurnAngle) * 0.25
+                local v25 = CFrame.new
+                p1.AlignOrientation.CFrame = v25(Vector3.new(0, 0, 0), Vector3.new(v2.LookVector.X, 0, v2.LookVector.Z).Unit) * CFrame.Angles(0, 0, (v13 + p1.SwayY) * math.pi * 0.03) * CFrame.Angles((v15 + p1.SwayX) * math.pi * 0.02, 0, 0) * CFrame.Angles(0, v24, 0) + v2.p
+            end
+        end
+    end)
+    pcall(function()
+        -- 2. Hook JetSki class
+        local JetSkiObj = ReplicatedStorage:FindFirstChild("Game", true)
+        local JetSkiMod = JetSkiObj and JetSkiObj:FindFirstChild("VehicleSystem") and JetSkiObj.VehicleSystem:FindFirstChild("JetSki")
+        if JetSkiMod then
+            local JetSki = require(JetSkiMod)
+            local origJetSkiFromPacket = JetSki.FromPacket
+            JetSki.FromPacket = function(p1)
+                local obj = origJetSkiFromPacket(p1)
+                if obj and obj.VectorForce then
+                    local originalVectorForce = obj.VectorForce
+                    local proxyForce = {}
+                    setmetatable(proxyForce, {
+                        __newindex = function(tbl, key, val)
+                            if key == "Force" then
+                                local touching = obj.BuoyancySensor and obj.BuoyancySensor.TouchingSurface
+                                local force = val
+                                if not touching then
+                                    if boatDriveOnLand then
+                                        force = force * (1 / 0.3) * boatSpeedMult
+                                    else
+                                        force = force * boatSpeedMult
+                                    end
+                                else
+                                    force = force * boatSpeedMult
+                                end
+                                originalVectorForce.Force = force
+                            else
+                                originalVectorForce[key] = val
+                            end
+                        end,
+                        __index = function(tbl, key)
+                            if key == "Force" then
+                                return originalVectorForce.Force
+                            end
+                            return originalVectorForce[key]
+                        end
+                    })
+                    obj.VectorForce = proxyForce
+                end
+                return obj
+            end
+        end
+    end)
+end
+-- Car Flight Control
+local flyBV = nil
+local flyBG = nil
+local function updateCarFlight()
+    local VehicleUtilsObj = ReplicatedStorage:FindFirstChild("VehicleUtils", true)
+    if not VehicleUtilsObj then return end
+    
+    local VehicleUtils = require(VehicleUtilsObj)
+    local packet = VehicleUtils.GetLocalVehiclePacket()
+    
+    if not carFlightEnabled or not packet or not packet.Model or not packet.Base then
+        if flyBV then flyBV:Destroy() flyBV = nil end
+        if flyBG then flyBG:Destroy() flyBG = nil end
+        return
+    end
+    
+    local base = packet.Base
+    if not flyBV or flyBV.Parent ~= base then
+        if flyBV then flyBV:Destroy() end
+        flyBV = Instance.new("BodyVelocity")
+        flyBV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        flyBV.Velocity = Vector3.new(0, 0, 0)
+        flyBV.Parent = base
+    end
+    
+    if not flyBG or flyBG.Parent ~= base then
+        if flyBG then flyBG:Destroy() end
+        flyBG = Instance.new("BodyGyro")
+        flyBG.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+        flyBG.CFrame = base.CFrame
+        flyBG.Parent = base
+    end
+    
+    local camera = workspace.CurrentCamera
+    local moveDir = Vector3.new(0, 0, 0)
+    
+    local isPressed = function(key)
+        return UserInputService:IsKeyDown(key)
+    end
+    
+    if isPressed(Enum.KeyCode.W) then
+        moveDir = moveDir + camera.CFrame.LookVector
+    end
+    if isPressed(Enum.KeyCode.S) then
+        moveDir = moveDir - camera.CFrame.LookVector
+    end
+    if isPressed(Enum.KeyCode.A) then
+        moveDir = moveDir - camera.CFrame.RightVector
+    end
+    if isPressed(Enum.KeyCode.D) then
+        moveDir = moveDir + camera.CFrame.RightVector
+    end
+    if isPressed(Enum.KeyCode.Space) then
+        moveDir = moveDir + Vector3.new(0, 1, 0)
+    end
+    if isPressed(Enum.KeyCode.LeftShift) or isPressed(Enum.KeyCode.LeftControl) then
+        moveDir = moveDir - Vector3.new(0, 1, 0)
+    end
+    
+    if moveDir.Magnitude > 0 then
+        moveDir = moveDir.Unit
+        flyBV.Velocity = moveDir * carFlightSpeed
+    else
+        flyBV.Velocity = Vector3.new(0, 0, 0)
+    end
+    
+    local look = camera.CFrame.LookVector
+    local flatLook = Vector3.new(look.X, 0, look.Z).Unit
+    if flatLook.Magnitude > 0 then
+        flyBG.CFrame = CFrame.new(Vector3.new(), flatLook)
+    end
+end
+-- Audio System Setup
+local function updateAllSoundsVolume()
+    for sound, origVolume in pairs(soundOrigVolumes) do
+        pcall(function()
+            sound.Volume = origVolume * audioVolumeMultiplier
+        end)
+    end
+end
+local function setupAudioSystem()
+    local safeServices = {
+        workspace,
+        game:GetService("SoundService"),
+        game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui"),
+        game:GetService("Lighting"),
+        game:GetService("ReplicatedStorage")
+    }
+    local function applyVolumeToSound(sound)
+        if not sound:IsA("Sound") then return end
+        
+        -- Store original volume if not already stored
+        if not soundOrigVolumes[sound] then
+            soundOrigVolumes[sound] = sound.Volume
+            
+            -- Listen for Volume changes by the game scripts
+            sound:GetPropertyChangedSignal("Volume"):Connect(function()
+                local expectedVolume = soundOrigVolumes[sound] * audioVolumeMultiplier
+                if math.abs(sound.Volume - expectedVolume) > 0.01 then
+                    soundOrigVolumes[sound] = sound.Volume
+                    sound.Volume = sound.Volume * audioVolumeMultiplier
+                end
+            end)
+        end
+        
+        sound.Volume = soundOrigVolumes[sound] * audioVolumeMultiplier
+    end
+    -- Apply to all existing sounds
+    for _, service in ipairs(safeServices) do
+        for _, desc in ipairs(service:GetDescendants()) do
+            pcall(applyVolumeToSound, desc)
+        end
+    end
+    -- Listen for new sounds
+    for _, service in ipairs(safeServices) do
+        service.DescendantAdded:Connect(function(desc)
+            pcall(applyVolumeToSound, desc)
+        end)
+    end
+end
 -- ===================== AIMBOT =====================
 local function isPlayerArrested(player)
     if player.Team and player.Team.Name == "Prisoner" then return true end
@@ -392,12 +577,10 @@ local function isPlayerArrested(player)
     end
     return false
 end
-
 local function isTeammate(player)
     if not LocalPlayer.Team or not player.Team then return false end
     return LocalPlayer.Team == player.Team
 end
-
 local function isAlive(player)
     local char = player.Character
     if not char then return false end
@@ -405,14 +588,11 @@ local function isAlive(player)
     if not humanoid then return false end
     return humanoid.Health > 0
 end
-
 local function isVisible(targetPart)
     local origin = Camera.CFrame.Position
     local direction = (targetPart.Position - origin)
-
     local rayParams = RaycastParams.new()
     rayParams.FilterType = Enum.RaycastFilterType.Exclude
-
     local ignoreList = {}
     if LocalPlayer.Character then
         table.insert(ignoreList, LocalPlayer.Character)
@@ -422,7 +602,6 @@ local function isVisible(targetPart)
         table.insert(ignoreList, vehiclesFolder)
     end
     rayParams.FilterDescendantsInstances = ignoreList
-
     local result = workspace:Raycast(origin, direction, rayParams)
     if result then
         local hitPart = result.Instance
@@ -434,82 +613,65 @@ local function isVisible(targetPart)
     end
     return true
 end
-
 local function getClosestTarget()
     local closest = nil
     local closestDist = math.huge
     local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             if aimbotIgnoreTeam and isTeammate(player) then continue end
             if aimbotIgnoreArrested and isPlayerArrested(player) then continue end
             if not isAlive(player) then continue end
-
             local char = player.Character
             if not char then continue end
-
             local targetPart = char:FindFirstChild(aimbotTargetPart) or char:FindFirstChild("Head")
             if not targetPart then continue end
-
             local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
             if not onScreen then continue end
-
             local screenPosV2 = Vector2.new(screenPos.X, screenPos.Y)
             local distFromCenter = (screenPosV2 - screenCenter).Magnitude
-
             if distFromCenter > aimbotFOV then continue end
             if aimbotIgnoreWalls and not isVisible(targetPart) then continue end
-
             if distFromCenter < closestDist then
                 closestDist = distFromCenter
                 closest = player
             end
         end
     end
-
     return closest
 end
-
 local function updateAimbot()
     if fovCircle then
         fovCircle.Visible = aimbotEnabled and aimbotShowFOV
         fovCircle.Radius = aimbotFOV
         fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     end
-
     if not aimbotEnabled then
         aimbotCurrentTarget = nil
         return
     end
-
     local isAiming = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     if not isAiming then
         aimbotCurrentTarget = nil
         return
     end
-
     local target = getClosestTarget()
     aimbotCurrentTarget = target
-
     if target and target.Character then
         local targetPart = target.Character:FindFirstChild(aimbotTargetPart) or target.Character:FindFirstChild("Head")
         if targetPart then
             local targetPos = targetPart.Position
             local currentCF = Camera.CFrame
             local targetCF = CFrame.lookAt(currentCF.Position, targetPos)
-
             local smoothFactor = 1 / math.clamp(aimbotSmoothing, 1, 20)
             Camera.CFrame = currentCF:Lerp(targetCF, smoothFactor)
         end
     end
 end
-
 -- ===================== WEAPON MODIFIERS =====================
 local function backupWeaponConfigs()
     local ItemConfig = ReplicatedStorage:FindFirstChild("ItemConfig", true)
     if not ItemConfig then return end
-
     for _, child in ipairs(ItemConfig:GetChildren()) do
         if child:IsA("ModuleScript") then
             local success, config = pcall(require, child)
@@ -527,11 +689,9 @@ local function backupWeaponConfigs()
         end
     end
 end
-
 local function applyWeaponModifiers()
     local ItemConfig = ReplicatedStorage:FindFirstChild("ItemConfig", true)
     if not ItemConfig then return end
-
     for _, child in ipairs(ItemConfig:GetChildren()) do
         if child:IsA("ModuleScript") then
             local success, config = pcall(require, child)
@@ -539,11 +699,11 @@ local function applyWeaponModifiers()
                 local backup = weaponConfigBackup[child.Name]
                 if backup then
                     if backup.FireFreq ~= nil then
-                        config.FireFreq = weaponModifiers.fastFire and 25 or backup.FireFreq
+                        -- Use 2x original rate to stay within server validation
+                        config.FireFreq = weaponModifiers.fastFire and (backup.FireFreq * 2) or backup.FireFreq
                     end
-                    if backup.MagSize ~= nil then
-                        config.MagSize = weaponModifiers.maxAmmo and 250 or backup.MagSize
-                    end
+                    -- MagSize is no longer modified here; infinite ammo is handled
+                    -- by resetting AmmoCurrentLocal in the heartbeat loop
                     if backup.ReloadTime ~= nil then
                         config.ReloadTime = weaponModifiers.instaReload and 0.1 or backup.ReloadTime
                     end
@@ -564,11 +724,9 @@ local function applyWeaponModifiers()
         end
     end
 end
-
 local function restoreWeaponConfigs()
     local ItemConfig = ReplicatedStorage:FindFirstChild("ItemConfig", true)
     if not ItemConfig then return end
-
     for _, child in ipairs(ItemConfig:GetChildren()) do
         if child:IsA("ModuleScript") then
             local success, config = pcall(require, child)
@@ -583,61 +741,43 @@ local function restoreWeaponConfigs()
         end
     end
 end
-
 -- ===================== AUTO ARREST =====================
--- Works by hooking into the CircleAction (E-prompt) system used for handcuff arrests,
--- and also by directly finding and pressing the active interaction spec.
-
 local _lastAutoArrestTick = 0
-
 local function doAutoArrest()
     if not autoArrestEnabled then return end
     if tick() - _lastAutoArrestTick < 0.5 then return end -- cooldown
-
     local character = LocalPlayer.Character
     if not character then return end
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-
-    -- Method 1: Use the CircleAction system (handles all E-prompts including arrest)
+    -- Method 1: Use the CircleAction system - ONLY press if the spec is an Arrest action
+    -- The game's arrest spec has Name="Arrest", IsPlayer=true, and a PlayerName field
     local UIModule = getUIModule()
     if UIModule then
         local CircleAction = UIModule.CircleAction
         if CircleAction and CircleAction.Spec then
             local spec = CircleAction.Spec
-            -- The CircleAction spec is already the closest valid interaction
-            -- For arrests, the spec is present when handcuffs are equipped near a criminal
-            if spec.Callback and spec.Enabled ~= false then
-                -- If it's a timed action (hold E), simulate the full hold
-                if spec.Timed then
-                    CircleAction.Press()
-                    _lastAutoArrestTick = tick()
-                else
-                    CircleAction.Press()
-                    _lastAutoArrestTick = tick()
-                end
+            -- Only trigger on arrest-specific E-prompts, not doors/vehicles/robbery items
+            if spec.Name == "Arrest" and spec.Callback and spec.Enabled ~= false then
+                CircleAction.Press()
+                _lastAutoArrestTick = tick()
                 return
             end
         end
     end
-
     -- Method 2: Check if we have handcuffs equipped and look for nearby criminals
-    -- If the ItemSystem is available, check the equipped item
     pcall(function()
         local ItemSystem = require(ReplicatedStorage:FindFirstChild("Game"):FindFirstChild("ItemSystem"):FindFirstChild("ItemSystem"))
         local equipped = ItemSystem.GetLocalEquipped()
         if equipped and equipped.__ClassName == "Handcuffs" then
-            -- Handcuffs are equipped - find nearest criminal to arrest
             local handcuffsConfig = getHandcuffsConfig()
             local arrestDist = handcuffsConfig and handcuffsConfig.ArrestDistance or autoArrestRange
-
             for _, player in ipairs(Players:GetPlayers()) do
                 if player ~= LocalPlayer and player.Character then
                     local targetHrp = player.Character:FindFirstChild("HumanoidRootPart")
                     local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
                     if targetHrp and humanoid and humanoid.Health > 0 then
                         local dist = (hrp.Position - targetHrp.Position).Magnitude
-                        -- Check if they're a criminal (Prisoner team, no handcuffs already)
                         local isPrisoner = false
                         pcall(function()
                             local settings = getSettings()
@@ -648,11 +788,8 @@ local function doAutoArrest()
                         if not isPrisoner and player.Team then
                             isPrisoner = player.Team.Name == "Criminal" or player.Team.Name == "Prisoner"
                         end
-
                         local alreadyArrested = player.Character:GetAttribute("HasHandcuffs") == true
-
                         if isPrisoner and not alreadyArrested and dist <= arrestDist then
-                            -- Simulate the shoot/use input for handcuffs
                             if equipped.ShootBegin then
                                 pcall(function() equipped:ShootBegin() end)
                             elseif equipped.InputBegan then
@@ -671,22 +808,15 @@ local function doAutoArrest()
         end
     end)
 end
-
 -- ===================== AUTO ROB =====================
--- Automatically interacts with robbery CircleAction prompts (E-hold interactions)
--- such as: Collect, Place Dynamite, Pull Lever, Hack, Open Vault, Bag, etc.
-
 local _lastAutoRobTick = 0
 local _robHoldStartTime = nil
-
--- Names of robbery-related CircleAction prompts
 local ROB_ACTION_KEYWORDS = {
     "collect", "rob", "dynamite", "lever", "hack", "open", "vault",
     "safe", "bag", "keycard", "crack", "drill", "grab", "steal",
     "break", "smash", "switch", "sit", "rope", "hatch",
     "inspect", "pick", "enter"
 }
-
 local function isRobAction(name)
     if not name then return false end
     local lower = string.lower(name)
@@ -695,21 +825,17 @@ local function isRobAction(name)
             return true
         end
     end
-    -- If it has no name but is a timed action near a robbery tagged object, still try
     return false
 end
-
 local function doAutoRob()
     if not autoRobEnabled then
         _robHoldStartTime = nil
         return
     end
-
     local UIModule = getUIModule()
     if not UIModule then return end
     local CircleAction = UIModule.CircleAction
     if not CircleAction then return end
-
     local spec = CircleAction.Spec
     if not spec then
         _robHoldStartTime = nil
@@ -723,60 +849,43 @@ local function doAutoRob()
         _robHoldStartTime = nil
         return
     end
-
-    -- Decide if this is a rob action
     local shouldRob = isRobAction(spec.Name)
-    -- Also rob if it's unnamed but timed (most robbery interactions are timed)
     if not shouldRob and spec.Timed and not spec.Name then
         shouldRob = true
     end
-
     if not shouldRob then
         _robHoldStartTime = nil
         return
     end
-
-    -- For timed actions, we need to simulate holding E
     if spec.Timed then
         if not spec.Pressed then
             CircleAction.Press()
             _robHoldStartTime = tick()
         end
-        -- The CircleAction system handles the hold duration internally via ProcessSpec
     else
-        -- Instant action, just press
         if tick() - _lastAutoRobTick > 1.0 then
             CircleAction.Press()
             _lastAutoRobTick = tick()
         end
     end
 end
-
 -- ===================== AUTO OPEN DOORS =====================
--- Opens all Door2-system doors by setting their DoorOpen attribute.
--- Door2 doors listen for attribute changes and animate accordingly.
--- Also handles NetSync slide doors seen in the remote spy.
-
 local _lastDoorScanTick = 0
-
 local function openAllDoors()
     if not autoDoorsEnabled then return end
-    if tick() - _lastDoorScanTick < 2.0 then return end -- scan every 2 seconds
+    if tick() - _lastDoorScanTick < 2.0 then return end
     _lastDoorScanTick = tick()
-
     local character = LocalPlayer.Character
     if not character then return end
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     local playerPos = hrp.Position
-
-    -- Method 1: Door2 system - set DoorOpen attribute on nearby tagged doors
     pcall(function()
         local taggedDoors = CollectionService:GetTagged("Door2")
         for _, door in ipairs(taggedDoors) do
             if door:IsA("Model") and door.PrimaryPart then
                 local dist = (door.PrimaryPart.Position - playerPos).Magnitude
-                if dist <= 60 then -- only open doors within 60 studs
+                if dist <= 60 then
                     if door:GetAttribute("DoorOpen") ~= true then
                         door:SetAttribute("DoorOpen", true)
                     end
@@ -784,8 +893,6 @@ local function openAllDoors()
             end
         end
     end)
-
-    -- Method 2: Try using DoorUtils directly for more reliable door opening
     local DoorUtils = getDoorUtils()
     if DoorUtils then
         pcall(function()
@@ -804,27 +911,18 @@ local function openAllDoors()
             end
         end)
     end
-
-    -- Method 3: Handle slide doors (NetSync-based doors like prison gates)
-    -- These use a different system through the network event with CFrame-based animation
     pcall(function()
-        -- Find SlideDoor models in workspace
         for _, obj in ipairs(workspace:GetDescendants()) do
             if obj:IsA("Model") and (obj.Name == "SlideDoor" or string.find(obj.Name, "SlideDoor")) then
                 if obj.PrimaryPart then
                     local dist = (obj.PrimaryPart.Position - playerPos).Magnitude
                     if dist <= 60 then
-                        -- Try setting attributes that control slide doors
-                        pcall(function()
-                            obj:SetAttribute("DoorOpen", true)
-                        end)
+                        obj:SetAttribute("DoorOpen", true)
                     end
                 end
             end
         end
     end)
-
-    -- Method 4: Handle doors that use DoorPctOpen (percentage-based doors)
     pcall(function()
         local taggedDoors = CollectionService:GetTagged("Door2")
         for _, door in ipairs(taggedDoors) do
@@ -840,19 +938,16 @@ local function openAllDoors()
         end
     end)
 end
-
 -- ===================== INIT =====================
 for _, player in ipairs(Players:GetPlayers()) do
     createESP(player)
 end
 addConnection(Players.PlayerAdded:Connect(createESP))
 addConnection(Players.PlayerRemoving:Connect(removeESP))
-
 local bountyDataObj = ReplicatedStorage:FindFirstChild("BountyData")
 if bountyDataObj then
     addConnection(bountyDataObj.Changed:Connect(updateESP))
 end
-
 local loopActive = true
 task.spawn(function()
     while loopActive do
@@ -860,8 +955,6 @@ task.spawn(function()
         task.wait(1)
     end
 end)
-
--- Auto features loop (separate slower loop)
 task.spawn(function()
     while loopActive do
         pcall(doAutoArrest)
@@ -870,24 +963,67 @@ task.spawn(function()
         task.wait(0.3)
     end
 end)
-
+-- ===================== INFINITE AMMO =====================
+local function updateInfiniteAmmo()
+    if not weaponModifiers.infiniteAmmo then return end
+    pcall(function()
+        local InventoryItemUtils = require(ReplicatedStorage:FindFirstChild("Inventory", true):FindFirstChild("InventoryItemUtils"))
+        local ItemDataUtils = require(ReplicatedStorage:FindFirstChild("App", true):FindFirstChild("ItemDataUtils"))
+        local char = LocalPlayer.Character
+        if not char then return end
+        -- Find the equipped tool's inventory item value
+        for _, tool in ipairs(char:GetChildren()) do
+            if tool:IsA("Tool") then
+                local invValue = tool:FindFirstChild("InventoryItemValue") or tool:FindFirstChild("inventoryItemValue")
+                if invValue then
+                    local ammoCurrent = invValue:GetAttribute("AmmoCurrentLocal")
+                    local ammoServer = invValue:GetAttribute("AmmoCurrent")
+                    if ammoCurrent ~= nil then
+                        -- Get the weapon's MagSize from config
+                        local itemName = invValue:GetAttribute("Name") or tool.Name
+                        local magSize = nil
+                        pcall(function()
+                            local cfg = ItemDataUtils.getConfig(itemName)
+                            if cfg then magSize = cfg.MagSize end
+                        end)
+                        if not magSize then
+                            local ItemConfig = ReplicatedStorage:FindFirstChild("ItemConfig", true)
+                            if ItemConfig then
+                                local cfgMod = ItemConfig:FindFirstChild(tool.Name)
+                                if cfgMod then
+                                    local ok, cfg = pcall(require, cfgMod)
+                                    if ok and cfg.MagSize then magSize = cfg.MagSize end
+                                end
+                            end
+                        end
+                        magSize = magSize or 30
+                        -- Keep ammo at max so we never need to reload
+                        if ammoCurrent < magSize then
+                            invValue:SetAttribute("AmmoCurrentLocal", magSize)
+                            invValue:SetAttribute("AmmoCurrent", magSize)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
 local heartbeatConn = RunService.Heartbeat:Connect(function()
     if loopActive then
         updateVehicle()
         updatePlayerMovement()
+        updateInfiniteAmmo()
+        updateCarFlight()
     end
 end)
 addConnection(heartbeatConn)
-
 local renderConn = RunService.RenderStepped:Connect(function()
     if loopActive then
         updateAimbot()
     end
 end)
 addConnection(renderConn)
-
 backupWeaponConfigs()
-
 table.insert(_G.JailbreakESP_Connections, {
     Connected = true,
     Disconnect = function(self)
@@ -902,7 +1038,6 @@ table.insert(_G.JailbreakESP_Connections, {
             fovCircle:Remove()
         end
         restoreWeaponConfigs()
-
         local character = LocalPlayer.Character
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
         if humanoid then
@@ -910,27 +1045,23 @@ table.insert(_G.JailbreakESP_Connections, {
         end
     end
 })
-
 -- ===================== UI =====================
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = GUI_NAME
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = CoreGui
-
 local function makeDraggable(frame, parentToDrag)
     local dragToggle = nil
     local dragSpeed = 0.08
     local dragInput = nil
     local dragStart = nil
     local dragStartPos = nil
-
     local function updateInputDrag(input)
         local delta = input.Position - dragStart
         local position = UDim2.new(dragStartPos.X.Scale, dragStartPos.X.Offset + delta.X, dragStartPos.Y.Scale, dragStartPos.Y.Offset + delta.Y)
         TweenService:Create(parentToDrag, TweenInfo.new(dragSpeed), {Position = position}):Play()
     end
-
     frame.InputBegan:Connect(function(input)
         if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and UserInputService:GetFocusedTextBox() == nil then
             dragToggle = true
@@ -943,20 +1074,17 @@ local function makeDraggable(frame, parentToDrag)
             end)
         end
     end)
-
     frame.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
-
     UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragToggle then
             updateInputDrag(input)
         end
     end)
 end
-
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
 mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -966,16 +1094,13 @@ mainFrame.BackgroundColor3 = Color3.fromRGB(18, 19, 26)
 mainFrame.BorderSizePixel = 0
 mainFrame.ClipsDescendants = true
 mainFrame.Parent = screenGui
-
 local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 12)
 corner.Parent = mainFrame
-
 local borderStroke = Instance.new("UIStroke")
 borderStroke.Color = Color3.fromRGB(45, 47, 62)
 borderStroke.Thickness = 1
 borderStroke.Parent = mainFrame
-
 local titleBar = Instance.new("TextLabel")
 titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1, 0, 0, 36)
@@ -986,16 +1111,13 @@ titleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleBar.TextSize = 14
 titleBar.Active = true
 titleBar.Parent = mainFrame
-
 local titleLine = Instance.new("Frame")
 titleLine.Size = UDim2.new(1, 0, 0, 1)
 titleLine.Position = UDim2.new(0, 0, 1, 0)
 titleLine.BackgroundColor3 = Color3.fromRGB(30, 31, 41)
 titleLine.BorderSizePixel = 0
 titleLine.Parent = titleBar
-
 makeDraggable(titleBar, mainFrame)
-
 -- Tab bar
 local tabBar = Instance.new("Frame")
 tabBar.Name = "TabBar"
@@ -1003,19 +1125,16 @@ tabBar.Size = UDim2.new(1, 0, 0, 28)
 tabBar.Position = UDim2.new(0, 0, 0, 36)
 tabBar.BackgroundTransparency = 1
 tabBar.Parent = mainFrame
-
 local tabLine = Instance.new("Frame")
 tabLine.Size = UDim2.new(1, 0, 0, 1)
 tabLine.Position = UDim2.new(0, 0, 1, 0)
 tabLine.BackgroundColor3 = Color3.fromRGB(30, 31, 41)
 tabLine.BorderSizePixel = 0
 tabLine.Parent = tabBar
-
 local tabNames = {"PLAYER", "VEHICLE", "AIMBOT", "WEAPONS", "AUTO"}
 local tabButtons = {}
 local tabContainers = {}
 local numTabs = #tabNames
-
 local activeIndicator = Instance.new("Frame")
 activeIndicator.Name = "ActiveIndicator"
 activeIndicator.Size = UDim2.new(1/numTabs, 0, 0, 2)
@@ -1023,14 +1142,12 @@ activeIndicator.Position = UDim2.new(0, 0, 1, -2)
 activeIndicator.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
 activeIndicator.BorderSizePixel = 0
 activeIndicator.Parent = tabBar
-
 local contentFrame = Instance.new("Frame")
 contentFrame.Name = "ContentFrame"
 contentFrame.Size = UDim2.new(1, 0, 1, -64)
 contentFrame.Position = UDim2.new(0, 0, 0, 64)
 contentFrame.BackgroundTransparency = 1
 contentFrame.Parent = mainFrame
-
 for i, tabName in ipairs(tabNames) do
     local btn = Instance.new("TextButton")
     btn.Name = tabName .. "Tab"
@@ -1043,7 +1160,6 @@ for i, tabName in ipairs(tabNames) do
     btn.TextSize = 10
     btn.Parent = tabBar
     tabButtons[i] = btn
-
     local container = Instance.new("ScrollingFrame")
     container.Name = tabName .. "Container"
     container.Size = UDim2.new(1, 0, 1, 0)
@@ -1056,7 +1172,6 @@ for i, tabName in ipairs(tabNames) do
     container.BorderSizePixel = 0
     container.Parent = contentFrame
     tabContainers[i] = container
-
     btn.MouseButton1Click:Connect(function()
         for j, c in ipairs(tabContainers) do
             c.Visible = j == i
@@ -1069,13 +1184,11 @@ for i, tabName in ipairs(tabNames) do
         }):Play()
     end)
 end
-
 local playerContainer = tabContainers[1]
 local vehicleContainer = tabContainers[2]
 local aimbotContainer = tabContainers[3]
 local weaponsContainer = tabContainers[4]
 local autoContainer = tabContainers[5]
-
 -- ===================== UI HELPERS =====================
 local function createToggleRow(parent, name, labelText, yOffset, defaultState, callback)
     local container = Instance.new("Frame")
@@ -1084,7 +1197,6 @@ local function createToggleRow(parent, name, labelText, yOffset, defaultState, c
     container.Position = UDim2.new(0.05, 0, 0, yOffset)
     container.BackgroundTransparency = 1
     container.Parent = parent
-
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.6, 0, 1, 0)
     label.BackgroundTransparency = 1
@@ -1094,7 +1206,6 @@ local function createToggleRow(parent, name, labelText, yOffset, defaultState, c
     label.TextSize = 13
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = container
-
     local switchBg = Instance.new("TextButton")
     switchBg.Name = "Switch"
     switchBg.Size = UDim2.new(0, 44, 0, 22)
@@ -1103,16 +1214,13 @@ local function createToggleRow(parent, name, labelText, yOffset, defaultState, c
     switchBg.Text = ""
     switchBg.AutoButtonColor = false
     switchBg.Parent = container
-
     local sc = Instance.new("UICorner")
     sc.CornerRadius = UDim.new(1, 0)
     sc.Parent = switchBg
-
     local ss = Instance.new("UIStroke")
     ss.Color = Color3.fromRGB(50, 52, 69)
     ss.Thickness = 1
     ss.Parent = switchBg
-
     local slider = Instance.new("Frame")
     slider.Name = "Slider"
     slider.Size = UDim2.new(0, 16, 0, 16)
@@ -1120,11 +1228,9 @@ local function createToggleRow(parent, name, labelText, yOffset, defaultState, c
     slider.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     slider.BorderSizePixel = 0
     slider.Parent = switchBg
-
     local slc = Instance.new("UICorner")
     slc.CornerRadius = UDim.new(1, 0)
     slc.Parent = slider
-
     local active = defaultState
     switchBg.MouseButton1Click:Connect(function()
         active = not active
@@ -1135,7 +1241,6 @@ local function createToggleRow(parent, name, labelText, yOffset, defaultState, c
         callback(active)
     end)
 end
-
 local function createAdjusterRow(parent, name, labelText, yOffset, defaultValue, minVal, maxVal, step, formatStr, callback)
     local container = Instance.new("Frame")
     container.Name = name .. "Container"
@@ -1143,7 +1248,6 @@ local function createAdjusterRow(parent, name, labelText, yOffset, defaultValue,
     container.Position = UDim2.new(0.05, 0, 0, yOffset)
     container.BackgroundTransparency = 1
     container.Parent = parent
-
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.5, 0, 1, 0)
     label.BackgroundTransparency = 1
@@ -1153,25 +1257,20 @@ local function createAdjusterRow(parent, name, labelText, yOffset, defaultValue,
     label.TextSize = 13
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = container
-
     local controlBg = Instance.new("Frame")
     controlBg.Size = UDim2.new(0, 110, 0, 26)
     controlBg.Position = UDim2.new(1, -110, 0.5, -13)
     controlBg.BackgroundColor3 = Color3.fromRGB(28, 29, 39)
     controlBg.BorderSizePixel = 0
     controlBg.Parent = container
-
     local cc = Instance.new("UICorner")
     cc.CornerRadius = UDim.new(0, 6)
     cc.Parent = controlBg
-
     local cs = Instance.new("UIStroke")
     cs.Color = Color3.fromRGB(45, 47, 62)
     cs.Thickness = 1
     cs.Parent = controlBg
-
     local value = defaultValue
-
     local decBtn = Instance.new("TextButton")
     decBtn.Size = UDim2.new(0, 26, 1, 0)
     decBtn.Position = UDim2.new(0, 0, 0, 0)
@@ -1181,7 +1280,6 @@ local function createAdjusterRow(parent, name, labelText, yOffset, defaultValue,
     decBtn.TextColor3 = Color3.fromRGB(150, 153, 175)
     decBtn.TextSize = 14
     decBtn.Parent = controlBg
-
     local incBtn = Instance.new("TextButton")
     incBtn.Size = UDim2.new(0, 26, 1, 0)
     incBtn.Position = UDim2.new(1, -26, 0, 0)
@@ -1191,7 +1289,6 @@ local function createAdjusterRow(parent, name, labelText, yOffset, defaultValue,
     incBtn.TextColor3 = Color3.fromRGB(150, 153, 175)
     incBtn.TextSize = 14
     incBtn.Parent = controlBg
-
     local valLabel = Instance.new("TextLabel")
     valLabel.Size = UDim2.new(1, -52, 1, 0)
     valLabel.Position = UDim2.new(0, 26, 0, 0)
@@ -1201,7 +1298,6 @@ local function createAdjusterRow(parent, name, labelText, yOffset, defaultValue,
     valLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     valLabel.TextSize = 12
     valLabel.Parent = controlBg
-
     decBtn.MouseButton1Click:Connect(function()
         value = math.clamp(value - step, minVal, maxVal)
         valLabel.Text = string.format(formatStr, value)
@@ -1213,7 +1309,6 @@ local function createAdjusterRow(parent, name, labelText, yOffset, defaultValue,
         callback(value)
     end)
 end
-
 local function createCycleRow(parent, name, labelText, yOffset, options, defaultIndex, callback)
     local container = Instance.new("Frame")
     container.Name = name .. "Container"
@@ -1221,7 +1316,6 @@ local function createCycleRow(parent, name, labelText, yOffset, options, default
     container.Position = UDim2.new(0.05, 0, 0, yOffset)
     container.BackgroundTransparency = 1
     container.Parent = parent
-
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.45, 0, 1, 0)
     label.BackgroundTransparency = 1
@@ -1231,25 +1325,20 @@ local function createCycleRow(parent, name, labelText, yOffset, options, default
     label.TextSize = 13
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = container
-
     local controlBg = Instance.new("Frame")
     controlBg.Size = UDim2.new(0, 140, 0, 26)
     controlBg.Position = UDim2.new(1, -140, 0.5, -13)
     controlBg.BackgroundColor3 = Color3.fromRGB(28, 29, 39)
     controlBg.BorderSizePixel = 0
     controlBg.Parent = container
-
     local cc = Instance.new("UICorner")
     cc.CornerRadius = UDim.new(0, 6)
     cc.Parent = controlBg
-
     local cs = Instance.new("UIStroke")
     cs.Color = Color3.fromRGB(45, 47, 62)
     cs.Thickness = 1
     cs.Parent = controlBg
-
     local idx = defaultIndex
-
     local prevBtn = Instance.new("TextButton")
     prevBtn.Size = UDim2.new(0, 26, 1, 0)
     prevBtn.Position = UDim2.new(0, 0, 0, 0)
@@ -1259,7 +1348,6 @@ local function createCycleRow(parent, name, labelText, yOffset, options, default
     prevBtn.TextColor3 = Color3.fromRGB(150, 153, 175)
     prevBtn.TextSize = 14
     prevBtn.Parent = controlBg
-
     local nextBtn = Instance.new("TextButton")
     nextBtn.Size = UDim2.new(0, 26, 1, 0)
     nextBtn.Position = UDim2.new(1, -26, 0, 0)
@@ -1269,7 +1357,6 @@ local function createCycleRow(parent, name, labelText, yOffset, options, default
     nextBtn.TextColor3 = Color3.fromRGB(150, 153, 175)
     nextBtn.TextSize = 14
     nextBtn.Parent = controlBg
-
     local valLabel = Instance.new("TextLabel")
     valLabel.Size = UDim2.new(1, -52, 1, 0)
     valLabel.Position = UDim2.new(0, 26, 0, 0)
@@ -1279,7 +1366,6 @@ local function createCycleRow(parent, name, labelText, yOffset, options, default
     valLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     valLabel.TextSize = 11
     valLabel.Parent = controlBg
-
     prevBtn.MouseButton1Click:Connect(function()
         idx = idx - 1
         if idx < 1 then idx = #options end
@@ -1293,7 +1379,6 @@ local function createCycleRow(parent, name, labelText, yOffset, options, default
         callback(options[idx])
     end)
 end
-
 local function createInfoLabel(parent, text, yOffset)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.9, 0, 0, 28)
@@ -1307,7 +1392,6 @@ local function createInfoLabel(parent, text, yOffset)
     label.TextWrapped = true
     label.Parent = parent
 end
-
 -- ===================== POPULATE TABS =====================
 -- Player Tab
 createToggleRow(playerContainer, "BountyESP", "Master ESP", 10, true, function(state)
@@ -1323,18 +1407,35 @@ end)
 createToggleRow(playerContainer, "NoSlow", "No Damage Slow", 136, false, function(state)
     noSlowEnabled = state
 end)
-
+createAdjusterRow(playerContainer, "GameVolume", "Game Volume", 178, 1.0, 0.0, 2.0, 0.1, "%.1fx", function(val)
+    audioVolumeMultiplier = val
+    updateAllSoundsVolume()
+end)
 -- Vehicle Tab
-createAdjusterRow(vehicleContainer, "CarSpeed", "Speed Mult", 10, 1.0, 1.0, 5.0, 0.5, "%.1fx", function(val)
+createAdjusterRow(vehicleContainer, "CarSpeed", "Speed Mult", 10, 1.0, 1.0, 500.0, 5.0, "%.0fx", function(val)
     carSpeedMult = val
 end)
-createAdjusterRow(vehicleContainer, "SuspHeight", "Ride Height", 52, 0.0, -2.0, 10.0, 1.0, "%+d studs", function(val)
+createAdjusterRow(vehicleContainer, "SuspHeight", "Ride Height", 52, 0.0, -100.0, 100.0, 5.0, "%+d studs", function(val)
     carHeightOffset = val
 end)
-createAdjusterRow(vehicleContainer, "TurnSpeed", "Steering Mult", 94, 1.0, 1.0, 3.0, 0.2, "%.1fx", function(val)
+createAdjusterRow(vehicleContainer, "TurnSpeed", "Steering Mult", 94, 1.0, 1.0, 5.0, 0.2, "%.1fx", function(val)
     carTurnSpeedMult = val
 end)
-
+createAdjusterRow(vehicleContainer, "BoatSpeed", "Boat Speed Mult", 136, 1.0, 1.0, 500.0, 5.0, "%.0fx", function(val)
+    boatSpeedMult = val
+end)
+createToggleRow(vehicleContainer, "BoatDriveOnLand", "Boat/JetSki Land Drive", 178, false, function(state)
+    boatDriveOnLand = state
+end)
+createToggleRow(vehicleContainer, "CarFlight", "Car Flight Mode", 220, false, function(state)
+    carFlightEnabled = state
+end)
+createAdjusterRow(vehicleContainer, "FlightSpeed", "Flight Speed", 262, 100, 10, 500, 10, "%d studs/s", function(val)
+    carFlightSpeed = val
+end)
+createToggleRow(vehicleContainer, "InfiniteBoost", "Infinite Boost / Nitro", 304, false, function(state)
+    infiniteBoostEnabled = state
+end)
 -- Aimbot Tab
 createToggleRow(aimbotContainer, "AimbotToggle", "Enable Aimbot", 10, false, function(state)
     aimbotEnabled = state
@@ -1360,15 +1461,13 @@ end)
 createToggleRow(aimbotContainer, "ShowFOV", "Show FOV Circle", 304, true, function(state)
     aimbotShowFOV = state
 end)
-
 -- Weapons Tab
-createToggleRow(weaponsContainer, "FastFire", "Fast Fire Rate", 10, false, function(state)
+createToggleRow(weaponsContainer, "FastFire", "Fast Fire (2x)", 10, false, function(state)
     weaponModifiers.fastFire = state
     applyWeaponModifiers()
 end)
-createToggleRow(weaponsContainer, "MaxAmmo", "Max Ammo (250)", 52, false, function(state)
-    weaponModifiers.maxAmmo = state
-    applyWeaponModifiers()
+createToggleRow(weaponsContainer, "InfiniteAmmo", "Infinite Ammo", 52, false, function(state)
+    weaponModifiers.infiniteAmmo = state
 end)
 createToggleRow(weaponsContainer, "InstaReload", "Instant Reload", 94, false, function(state)
     weaponModifiers.instaReload = state
@@ -1382,7 +1481,7 @@ createToggleRow(weaponsContainer, "NoRecoil", "No Recoil (No Shake)", 178, false
     weaponModifiers.noRecoil = state
     applyWeaponModifiers()
 end)
-createToggleRow(weaponsContainer, "AutoFire", "Automatic Fire", 220, false, function(state)
+createToggleRow(weaponsContainer, "AutoFire", "Auto Fire", 220, false, function(state)
     weaponModifiers.autoFire = state
     applyWeaponModifiers()
 end)
@@ -1390,45 +1489,32 @@ createToggleRow(weaponsContainer, "FastBullets", "Fast Bullets", 262, false, fun
     weaponModifiers.fastBullets = state
     applyWeaponModifiers()
 end)
-
 -- Auto Tab
 createToggleRow(autoContainer, "AutoArrest", "Auto Arrest", 10, false, function(state)
     autoArrestEnabled = state
 end)
-createInfoLabel(autoContainer, "  Equip handcuffs & stand near criminals. Auto-presses E.", 46)
-
-createToggleRow(autoContainer, "AutoRob", "Auto Rob", 74, false, function(state)
-    autoRobEnabled = state
-end)
-createInfoLabel(autoContainer, "  Auto-interacts with robbery prompts (E-hold actions).", 110)
-
-createToggleRow(autoContainer, "AutoDoors", "Auto Open Doors", 138, false, function(state)
-    autoDoorsEnabled = state
-end)
-createInfoLabel(autoContainer, "  Opens Door2 & slide doors within 60 studs every 2s.", 174)
-
-createAdjusterRow(autoContainer, "ArrestRange", "Arrest Range", 210, 15, 5, 50, 5, "%d studs", function(val)
+createAdjusterRow(autoContainer, "ArrestRange", "Arrest Range", 52, 15, 5, 50, 5, "%d studs", function(val)
     autoArrestRange = val
 end)
-
--- Footer
+createToggleRow(autoContainer, "AutoRob", "Auto Rob Interactions", 94, false, function(state)
+    autoRobEnabled = state
+end)
+createAdjusterRow(autoContainer, "RobRange", "Rob Range", 136, 20, 5, 100, 5, "%d studs", function(val)
+    autoRobRange = val
+end)
+createToggleRow(autoContainer, "AutoDoors", "Auto Open Doors", 178, false, function(state)
+    autoDoorsEnabled = state
+end)
+-- Footnote
 local footer = Instance.new("TextLabel")
-footer.Size = UDim2.new(1, 0, 0, 22)
-footer.Position = UDim2.new(0, 0, 1, -22)
+footer.Size = UDim2.new(1, 0, 0, 20)
+footer.Position = UDim2.new(0, 0, 1, -20)
 footer.BackgroundTransparency = 1
-footer.Font = Enum.Font.GothamSemibold
-footer.Text = "[Insert] Hide  |  [RMB] Aim Lock"
-footer.TextColor3 = Color3.fromRGB(110, 112, 135)
-footer.TextSize = 10
+footer.Font = Enum.Font.SourceSansItalic
+footer.Text = "Press right-click to aim (Aimbot) | UI Draggable"
+footer.TextColor3 = Color3.fromRGB(80, 82, 100)
+footer.TextSize = 11
 footer.Parent = mainFrame
-
-local menuVisible = true
-addConnection(UserInputService.InputBegan:Connect(function(input, processed)
-    if not processed and input.KeyCode == Enum.KeyCode.Insert then
-        menuVisible = not menuVisible
-        mainFrame.Visible = menuVisible
-    end
-end))
-
-updateESP()
-return "Loaded"
+-- Hook vehicles and setup audio
+hookVehicles()
+setupAudioSystem()

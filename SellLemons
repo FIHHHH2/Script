@@ -1,0 +1,268 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+-- Retrieve Tycoon Modules
+local TycoonModule = require(ReplicatedStorage.Modules.Tycoon.Tycoon)
+local ClientTycoonIncome = require(ReplicatedStorage.Modules.Tycoon.Component.Client.ClientTycoonIncome)
+local ClientTycoonBalances = require(ReplicatedStorage.Modules.Tycoon.Component.Client.ClientTycoonBalances)
+local ClientTycoonEarner = require(ReplicatedStorage.Modules.Tycoon.Entity.Client.ClientTycoonEarner)
+local ClientTycoonPurchase = require(ReplicatedStorage.Modules.Tycoon.Entity.Client.ClientTycoonPurchase)
+local ClientTycoonPhoneOffers = require(ReplicatedStorage.Modules.Tycoon.Component.Client.ClientTycoonPhoneOffers)
+local localTycoon = TycoonModule.getLocal()
+if not localTycoon then
+    warn("Failed to find local tycoon.")
+    return
+end
+-- Clean up any existing instances of this UI
+local existing = PlayerGui:FindFirstChild("LemonAutofarmGui")
+if existing then
+    existing:Destroy()
+end
+-- Toggles
+local _G_Flags = {
+    AutoFarm = false,
+    AutoUpgrade = false,
+    AutoBuy = false,
+    AutoPhone = false
+}
+-- Create UI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "LemonAutofarmGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 260, 0, 375) -- Increased height to fit new button
+MainFrame.Position = UDim2.new(0.5, -130, 0.5, -187)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+-- Rounded corners
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = MainFrame
+-- Border Stroke
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(75, 75, 95)
+UIStroke.Thickness = 2
+UIStroke.Parent = MainFrame
+-- Dragging Logic
+local dragging, dragInput, dragStart, startPos
+local function update(input)
+    local delta = input.Position - dragStart
+    MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+-- Title
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, -40, 0, 45)
+Title.Position = UDim2.new(0, 15, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "🍋 Lemon Helper"
+Title.TextColor3 = Color3.fromRGB(255, 220, 70)
+Title.TextSize = 18
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = MainFrame
+-- Minimize / Close Button
+local CloseButton = Instance.new("TextButton")
+CloseButton.Name = "CloseButton"
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -40, 0, 7)
+CloseButton.BackgroundTransparency = 1
+CloseButton.Text = "✕"
+CloseButton.TextColor3 = Color3.fromRGB(150, 150, 160)
+CloseButton.TextSize = 16
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.Parent = MainFrame
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+-- Separator line
+local Separator = Instance.new("Frame")
+Separator.Name = "Separator"
+Separator.Size = UDim2.new(1, -20, 0, 1)
+Separator.Position = UDim2.new(0, 10, 0, 45)
+Separator.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+Separator.BorderSizePixel = 0
+Separator.Parent = MainFrame
+-- Container for buttons
+local Container = Instance.new("Frame")
+Container.Name = "Container"
+Container.Size = UDim2.new(1, -20, 1, -70)
+Container.Position = UDim2.new(0, 10, 0, 55)
+Container.BackgroundTransparency = 1
+Container.Parent = MainFrame
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 10)
+UIListLayout.Parent = Container
+-- Helper function to make toggle buttons
+local function makeToggleButton(name, flagName, layoutOrder)
+    local Button = Instance.new("TextButton")
+    Button.Name = name .. "Toggle"
+    Button.Size = UDim2.new(1, 0, 0, 45)
+    Button.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+    Button.Text = name .. ": OFF"
+    Button.TextColor3 = Color3.fromRGB(180, 180, 190)
+    Button.TextSize = 13
+    Button.Font = Enum.Font.GothamSemibold
+    Button.LayoutOrder = layoutOrder
+    Button.Parent = Container
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 8)
+    Corner.Parent = Button
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = Color3.fromRGB(55, 55, 65)
+    Stroke.Thickness = 1
+    Stroke.Parent = Button
+    Button.MouseButton1Click:Connect(function()
+        _G_Flags[flagName] = not _G_Flags[flagName]
+        if _G_Flags[flagName] then
+            Button.BackgroundColor3 = Color3.fromRGB(40, 100, 50)
+            Button.Text = name .. ": ON"
+            Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+            Stroke.Color = Color3.fromRGB(80, 180, 100)
+        else
+            Button.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+            Button.Text = name .. ": OFF"
+            Button.TextColor3 = Color3.fromRGB(180, 180, 190)
+            Stroke.Color = Color3.fromRGB(55, 55, 65)
+        end
+    end)
+end
+makeToggleButton("Auto Press (Farm)", "AutoFarm", 1)
+makeToggleButton("Auto Upgrade", "AutoUpgrade", 2)
+makeToggleButton("Auto Buy Buttons", "AutoBuy", 3)
+makeToggleButton("Auto Phone Offers", "AutoPhone", 4)
+-- Info Label
+local InfoLabel = Instance.new("TextLabel")
+InfoLabel.Name = "InfoLabel"
+InfoLabel.Size = UDim2.new(1, 0, 0, 30)
+InfoLabel.BackgroundTransparency = 1
+InfoLabel.Text = "Status: Idle"
+InfoLabel.TextColor3 = Color3.fromRGB(140, 140, 150)
+InfoLabel.TextSize = 12
+InfoLabel.Font = Enum.Font.Gotham
+InfoLabel.LayoutOrder = 5
+InfoLabel.Parent = Container
+-- Background loop for Auto Farm (Pressing)
+task.spawn(function()
+    while ScreenGui.Parent do
+        task.wait(0.2)
+        if _G_Flags.AutoFarm then
+            local earners = localTycoon:GetEntityDescendants()
+            local count = 0
+            for _, ent in ipairs(earners) do
+                if ent:IsA(ClientTycoonEarner) and ent:IsEnabled() then
+                    count = count + 1
+                    task.spawn(function()
+                        pcall(function()
+                            ent:WakeAsync()
+                        end)
+                    end)
+                end
+            end
+            InfoLabel.Text = "Autofarming " .. tostring(count) .. " earners..."
+        elseif not _G_Flags.AutoUpgrade and not _G_Flags.AutoBuy then
+            InfoLabel.Text = "Status: Idle"
+        end
+    end
+end)
+-- Background loop for Auto Upgrade
+task.spawn(function()
+    while ScreenGui.Parent do
+        task.wait(0.5)
+        if _G_Flags.AutoUpgrade then
+            local balances = localTycoon:GetComponent(ClientTycoonBalances)
+            local currentCash = balances:GetCash()
+            local earners = localTycoon:GetEntityDescendants()
+            
+            for _, ent in ipairs(earners) do
+                if ent:IsA(ClientTycoonEarner) and ent:IsEnabled() then
+                    local upgradeInfo = ent:GetNextUpgradeInfo()
+                    if upgradeInfo and not upgradeInfo.Max and upgradeInfo.Price <= currentCash then
+                        task.spawn(function()
+                            pcall(function()
+                                ent:Upgrade(upgradeInfo.Count, false)
+                            end)
+                        end)
+                    end
+                end
+            end
+        end
+    end
+end)
+-- Background loop for Auto Buy
+task.spawn(function()
+    while ScreenGui.Parent do
+        task.wait(0.5)
+        if _G_Flags.AutoBuy then
+            local balances = localTycoon:GetComponent(ClientTycoonBalances)
+            local currentCash = balances:GetCash()
+            local purchases = localTycoon:GetEntityDescendants()
+            
+            for _, ent in ipairs(purchases) do
+                if ent:IsA(ClientTycoonPurchase) and ent:IsEnabled() and not ent.Instance:GetAttribute("Purchased") then
+                    local price = ent:GetPrice()
+                    if price and price <= currentCash and ent.Instance:GetAttribute("Shown") then
+                        task.spawn(function()
+                            pcall(function()
+                                ent:TryPurchaseAsync(false)
+                            end)
+                        end)
+                    end
+                end
+            end
+        end
+    end
+end)
+-- Phone Offers Listener
+local phoneOffers = localTycoon:GetComponent(ClientTycoonPhoneOffers)
+if phoneOffers then
+    local function autoAccept()
+        if _G_Flags.AutoPhone then
+            task.wait(0.5) -- Small human-like delay
+            pcall(function()
+                if phoneOffers:GetCurrentOffer() then
+                    phoneOffers:AcceptOffer()
+                    InfoLabel.Text = "Status: Accepted phone offer!"
+                end
+            end)
+        end
+    end
+    ScreenGui.AncestryChanged:Connect(function()
+        if not ScreenGui.Parent then
+            -- Clean up connections if UI destroyed
+        end
+    end)
+    phoneOffers.OfferStarted:Connect(autoAccept)
+    phoneOffers.OfferUpdated:Connect(autoAccept)
+end

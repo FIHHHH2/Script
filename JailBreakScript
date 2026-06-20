@@ -325,15 +325,19 @@ local function updatePlayerMovement()
     end
 end
 -- ===================== VEHICLE =====================
+-- ===================== VEHICLE =====================
 local function updateVehicle()
     local VehicleUtilsObj = ReplicatedStorage:FindFirstChild("VehicleUtils", true)
     if not VehicleUtilsObj then return end
     pcall(function()
         local VehicleUtils = require(VehicleUtilsObj)
-        -- Infinite Boost / Nitro
+        -- Keep local nitroState attributes at max
         if infiniteBoostEnabled and VehicleUtils.nitroState then
-            VehicleUtils.nitroState.Nitro = VehicleUtils.nitroState.NitroLastMax or 250
-            VehicleUtils.nitroState.NitroForceUIUpdate = true
+            pcall(function()
+                VehicleUtils.nitroState.Nitro = 250
+                VehicleUtils.nitroState.NitroLastMax = 250
+                VehicleUtils.nitroState.NitroForceUIUpdate = true
+            end)
         end
         local packet = VehicleUtils.GetLocalVehiclePacket()
         if packet then
@@ -349,6 +353,17 @@ local function updateVehicle()
             end
             packet.Height = packet._origHeight + carHeightOffset
             packet.TurnSpeed = packet._origTurnSpeed * carTurnSpeedMult
+            -- Keep local packet custom state fields locked to bypass depletion
+            if infiniteBoostEnabled then
+                packet.Nitro = true
+                packet.Nitrof1 = true
+                packet.NitroLoop = true
+                
+                -- Support Volt bike/chassis boost
+                if packet.Model then
+                    packet.Model:SetAttribute("Nitro", 250)
+                end
+            end
         end
     end)
 end
@@ -456,13 +471,19 @@ local function updateCarFlight()
     local VehicleUtils = require(VehicleUtilsObj)
     local packet = VehicleUtils.GetLocalVehiclePacket()
     
-    if not carFlightEnabled or not packet or not packet.Model or not packet.Base then
+    if not carFlightEnabled or not packet or not packet.Model then
         if flyBV then flyBV:Destroy() flyBV = nil end
         if flyBG then flyBG:Destroy() flyBG = nil end
         return
     end
     
-    local base = packet.Base
+    local base = packet.Base or (packet.Model and packet.Model.PrimaryPart) or (packet.Model and packet.Model:FindFirstChild("Engine")) or (packet.Model and packet.Model:FindFirstChildOfClass("BasePart"))
+    if not base then
+        if flyBV then flyBV:Destroy() flyBV = nil end
+        if flyBG then flyBG:Destroy() flyBG = nil end
+        return
+    end
+    
     if not flyBV or flyBV.Parent ~= base then
         if flyBV then flyBV:Destroy() end
         flyBV = Instance.new("BodyVelocity")
@@ -1249,7 +1270,7 @@ local function createAdjusterRow(parent, name, labelText, yOffset, defaultValue,
     container.BackgroundTransparency = 1
     container.Parent = parent
     local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(0.5, 0, 1, 0)
+    label.Size = UDim2.new(0.4, 0, 1, 0)
     label.BackgroundTransparency = 1
     label.Font = Enum.Font.Gotham
     label.Text = labelText
@@ -1257,56 +1278,99 @@ local function createAdjusterRow(parent, name, labelText, yOffset, defaultValue,
     label.TextSize = 13
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = container
-    local controlBg = Instance.new("Frame")
-    controlBg.Size = UDim2.new(0, 110, 0, 26)
-    controlBg.Position = UDim2.new(1, -110, 0.5, -13)
-    controlBg.BackgroundColor3 = Color3.fromRGB(28, 29, 39)
-    controlBg.BorderSizePixel = 0
-    controlBg.Parent = container
-    local cc = Instance.new("UICorner")
-    cc.CornerRadius = UDim.new(0, 6)
-    cc.Parent = controlBg
-    local cs = Instance.new("UIStroke")
-    cs.Color = Color3.fromRGB(45, 47, 62)
-    cs.Thickness = 1
-    cs.Parent = controlBg
-    local value = defaultValue
-    local decBtn = Instance.new("TextButton")
-    decBtn.Size = UDim2.new(0, 26, 1, 0)
-    decBtn.Position = UDim2.new(0, 0, 0, 0)
-    decBtn.BackgroundTransparency = 1
-    decBtn.Font = Enum.Font.GothamBold
-    decBtn.Text = "-"
-    decBtn.TextColor3 = Color3.fromRGB(150, 153, 175)
-    decBtn.TextSize = 14
-    decBtn.Parent = controlBg
-    local incBtn = Instance.new("TextButton")
-    incBtn.Size = UDim2.new(0, 26, 1, 0)
-    incBtn.Position = UDim2.new(1, -26, 0, 0)
-    incBtn.BackgroundTransparency = 1
-    incBtn.Font = Enum.Font.GothamBold
-    incBtn.Text = "+"
-    incBtn.TextColor3 = Color3.fromRGB(150, 153, 175)
-    incBtn.TextSize = 14
-    incBtn.Parent = controlBg
+    -- Slider track background
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(0.4, 0, 0, 6)
+    sliderBg.Position = UDim2.new(0.42, 0, 0.5, -3)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(43, 45, 59)
+    sliderBg.BorderSizePixel = 0
+    sliderBg.Parent = container
+    local sbgc = Instance.new("UICorner")
+    sbgc.CornerRadius = UDim.new(1, 0)
+    sbgc.Parent = sliderBg
+    -- Slider fill (active part)
+    local sliderFill = Instance.new("Frame")
+    sliderFill.Size = UDim2.new(0, 0, 1, 0)
+    sliderFill.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
+    sliderFill.BorderSizePixel = 0
+    sliderFill.Parent = sliderBg
+    local sfc = Instance.new("UICorner")
+    sfc.CornerRadius = UDim.new(1, 0)
+    sfc.Parent = sliderFill
+    -- Slider handle
+    local handle = Instance.new("ImageButton")
+    handle.Size = UDim2.new(0, 14, 0, 14)
+    handle.AnchorPoint = Vector2.new(0.5, 0.5)
+    handle.Position = UDim2.new(0, 0, 0.5, 0)
+    handle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    handle.BorderSizePixel = 0
+    handle.Parent = sliderBg
+    local hc = Instance.new("UICorner")
+    hc.CornerRadius = UDim.new(1, 0)
+    hc.Parent = handle
+    local hs = Instance.new("UIStroke")
+    hs.Color = Color3.fromRGB(50, 52, 69)
+    hs.Thickness = 1
+    hs.Parent = handle
+    -- Value Label
     local valLabel = Instance.new("TextLabel")
-    valLabel.Size = UDim2.new(1, -52, 1, 0)
-    valLabel.Position = UDim2.new(0, 26, 0, 0)
+    valLabel.Size = UDim2.new(0.16, 0, 1, 0)
+    valLabel.Position = UDim2.new(0.84, 0, 0, 0)
     valLabel.BackgroundTransparency = 1
     valLabel.Font = Enum.Font.GothamBold
-    valLabel.Text = string.format(formatStr, value)
+    valLabel.Text = ""
     valLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    valLabel.TextSize = 12
-    valLabel.Parent = controlBg
-    decBtn.MouseButton1Click:Connect(function()
-        value = math.clamp(value - step, minVal, maxVal)
+    valLabel.TextSize = 11
+    valLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valLabel.Parent = container
+    local value = defaultValue
+    local function update(pct)
+        local rawValue = minVal + (maxVal - minVal) * pct
+        -- Snap to step
+        value = math.clamp(math.round(rawValue / step) * step, minVal, maxVal)
+        
+        -- Avoid precision issues with integer values
+        if step >= 1 then
+            value = math.round(value)
+        end
+        local visualPct = (value - minVal) / (maxVal - minVal)
+        handle.Position = UDim2.new(visualPct, 0, 0.5, 0)
+        sliderFill.Size = UDim2.new(visualPct, 0, 1, 0)
         valLabel.Text = string.format(formatStr, value)
         callback(value)
+    end
+    -- Initial position
+    update((defaultValue - minVal) / (maxVal - minVal))
+    -- Drag logic
+    local dragging = false
+    local function processInput(input)
+        local inputX = input.Position.X
+        local sliderX = sliderBg.AbsolutePosition.X
+        local width = sliderBg.AbsoluteSize.X
+        local pct = math.clamp((inputX - sliderX) / width, 0, 1)
+        update(pct)
+    end
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
     end)
-    incBtn.MouseButton1Click:Connect(function()
-        value = math.clamp(value + step, minVal, maxVal)
-        valLabel.Text = string.format(formatStr, value)
-        callback(value)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            processInput(input)
+        end
+    end)
+    -- Make clicking the bar also update the slider
+    sliderBg.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            processInput(input)
+            dragging = true
+        end
     end)
 end
 local function createCycleRow(parent, name, labelText, yOffset, options, defaultIndex, callback)
@@ -1412,16 +1476,16 @@ createAdjusterRow(playerContainer, "GameVolume", "Game Volume", 178, 1.0, 0.0, 2
     updateAllSoundsVolume()
 end)
 -- Vehicle Tab
-createAdjusterRow(vehicleContainer, "CarSpeed", "Speed Mult", 10, 1.0, 1.0, 500.0, 5.0, "%.0fx", function(val)
+createAdjusterRow(vehicleContainer, "CarSpeed", "Speed Mult", 10, 1.0, 1.0, 20.0, 0.5, "%.1fx", function(val)
     carSpeedMult = val
 end)
-createAdjusterRow(vehicleContainer, "SuspHeight", "Ride Height", 52, 0.0, -100.0, 100.0, 5.0, "%+d studs", function(val)
+createAdjusterRow(vehicleContainer, "SuspHeight", "Ride Height", 52, 0.0, -100.0, 100.0, 1.0, "%+d studs", function(val)
     carHeightOffset = val
 end)
 createAdjusterRow(vehicleContainer, "TurnSpeed", "Steering Mult", 94, 1.0, 1.0, 5.0, 0.2, "%.1fx", function(val)
     carTurnSpeedMult = val
 end)
-createAdjusterRow(vehicleContainer, "BoatSpeed", "Boat Speed Mult", 136, 1.0, 1.0, 500.0, 5.0, "%.0fx", function(val)
+createAdjusterRow(vehicleContainer, "BoatSpeed", "Boat Speed Mult", 136, 1.0, 1.0, 20.0, 0.5, "%.1fx", function(val)
     boatSpeedMult = val
 end)
 createToggleRow(vehicleContainer, "BoatDriveOnLand", "Boat/JetSki Land Drive", 178, false, function(state)
@@ -1493,13 +1557,13 @@ end)
 createToggleRow(autoContainer, "AutoArrest", "Auto Arrest", 10, false, function(state)
     autoArrestEnabled = state
 end)
-createAdjusterRow(autoContainer, "ArrestRange", "Arrest Range", 52, 15, 5, 50, 5, "%d studs", function(val)
+createAdjusterRow(autoContainer, "ArrestRange", "Arrest Range", 52, 15, 5, 50, 1, "%d studs", function(val)
     autoArrestRange = val
 end)
 createToggleRow(autoContainer, "AutoRob", "Auto Rob Interactions", 94, false, function(state)
     autoRobEnabled = state
 end)
-createAdjusterRow(autoContainer, "RobRange", "Rob Range", 136, 20, 5, 100, 5, "%d studs", function(val)
+createAdjusterRow(autoContainer, "RobRange", "Rob Range", 136, 20, 5, 100, 1, "%d studs", function(val)
     autoRobRange = val
 end)
 createToggleRow(autoContainer, "AutoDoors", "Auto Open Doors", 178, false, function(state)
@@ -1511,10 +1575,19 @@ footer.Size = UDim2.new(1, 0, 0, 20)
 footer.Position = UDim2.new(0, 0, 1, -20)
 footer.BackgroundTransparency = 1
 footer.Font = Enum.Font.SourceSansItalic
-footer.Text = "Press right-click to aim (Aimbot) | UI Draggable"
+footer.Text = "Press right-click to aim (Aimbot) | Toggle with ]"
 footer.TextColor3 = Color3.fromRGB(80, 82, 100)
 footer.TextSize = 11
 footer.Parent = mainFrame
+-- Toggle visibility with ]
+local menuVisible = true
+addConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.RightBracket then
+        menuVisible = not menuVisible
+        mainFrame.Visible = menuVisible
+    end
+end))
 -- Hook vehicles and setup audio
 hookVehicles()
 setupAudioSystem()

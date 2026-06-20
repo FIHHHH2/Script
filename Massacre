@@ -1,0 +1,1189 @@
+-- Massacre Multihack: Item Giver + ESP + Aimbot
+-- Game: Massacre (PlaceId 14386479662)
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local GUI_NAME = "MassacreHackMenu"
+local ESP_FOLDER = "MassacreESP"
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+-- ===================== CLEANUP =====================
+if _G.MassacreHack_Connections then
+    for _, conn in ipairs(_G.MassacreHack_Connections) do
+        if conn then
+            if typeof(conn) == "RBXScriptConnection" then
+                if conn.Connected then conn:Disconnect() end
+            elseif type(conn) == "table" and conn.Disconnect then
+                pcall(function() conn:Disconnect() end)
+            end
+        end
+    end
+end
+_G.MassacreHack_Connections = {}
+local function addConnection(conn)
+    table.insert(_G.MassacreHack_Connections, conn)
+end
+local oldGui = CoreGui:FindFirstChild(GUI_NAME)
+if oldGui then oldGui:Destroy() end
+local oldESP = CoreGui:FindFirstChild(ESP_FOLDER)
+if oldESP then oldESP:Destroy() end
+-- ===================== STATE =====================
+local espEnabled = true
+local aimbotEnabled = false
+local aimbotFOV = 150
+local aimbotSmoothing = 5
+local aimbotTargetPart = "Head"
+local aimbotShowFOV = true
+local aimbotCurrentTarget = nil
+-- Weapon Modifiers
+local GunConfig = require(ReplicatedStorage.Modules.Config.GunConfig)
+-- Make sure default Knife is in the config so it can be configured
+if not GunConfig.Knife then
+    GunConfig.Knife = {
+        Damage = 50,
+        FireRate = 1.0,
+        Range = 8,
+        FireMode = "Semi"
+    }
+end
+local weaponConfigBackup = {}
+local weaponModifiers = {
+    noSpread = false,
+    noRecoil = false,
+    rapidFire = false,
+    instantReload = false,
+    infiniteAmmo = false,
+    allAuto = false,
+}
+local meleeModifiers = {
+    rangeEnabled = false,
+    rangeValue = 15,
+    speedEnabled = false,
+    speedValue = 0.2,
+    allAuto = false,
+}
+-- Backup all original weapon configs (including melee weapons which don't have Name key)
+for weaponName, config in pairs(GunConfig) do
+    if type(config) == "table" then
+        local isMelee = (weaponName == "Knife" or weaponName == "Hunting Knife" or weaponName == "Bat" or weaponName == "Requiem")
+        weaponConfigBackup[weaponName] = {
+            Spread = config.Spread,
+            AimSpread = config.AimSpread,
+            FireRate = config.FireRate,
+            ReloadTime = config.ReloadTime,
+            MagazineSize = config.MagazineSize,
+            FireMode = config.FireMode or "Semi",
+            Range = config.Range or (isMelee and 8 or nil),
+            Recoil = config.Recoil and {
+                Kick = config.Recoil.Kick,
+                Rot = config.Recoil.Rot,
+                CameraKick = config.Recoil.CameraKick,
+            } or nil,
+            AimRecoilMult = config.AimRecoilMult,
+        }
+    end
+end
+local function applyWeaponModifiers()
+    for weaponName, backup in pairs(weaponConfigBackup) do
+        local config = GunConfig[weaponName]
+        if not config then continue end
+        local isMelee = weaponName == "Knife" or weaponName == "Hunting Knife" or weaponName == "Bat" or weaponName == "Requiem"
+        if isMelee then
+            -- Melee Range
+            if meleeModifiers.rangeEnabled then
+                config.Range = meleeModifiers.rangeValue
+            else
+                config.Range = backup.Range or 8
+            end
+            -- Melee Speed (FireRate)
+            if meleeModifiers.speedEnabled then
+                config.FireRate = meleeModifiers.speedValue
+            else
+                config.FireRate = backup.FireRate or 1.0
+            end
+            -- Melee Auto Swing
+            if meleeModifiers.allAuto then
+                config.FireMode = "Auto"
+            else
+                config.FireMode = backup.FireMode or "Semi"
+            end
+        else
+            -- No Spread
+            if weaponModifiers.noSpread then
+                config.Spread = 0
+                config.AimSpread = 0
+            else
+                config.Spread = backup.Spread
+                config.AimSpread = backup.AimSpread
+            end
+            -- No Recoil
+            if weaponModifiers.noRecoil and config.Recoil then
+                config.Recoil.Kick = Vector3.new(0, 0, 0)
+                config.Recoil.Rot = Vector3.new(0, 0, 0)
+                config.Recoil.CameraKick = 0
+                config.AimRecoilMult = 0
+            elseif backup.Recoil and config.Recoil then
+                config.Recoil.Kick = backup.Recoil.Kick
+                config.Recoil.Rot = backup.Recoil.Rot
+                config.Recoil.CameraKick = backup.Recoil.CameraKick
+                config.AimRecoilMult = backup.AimRecoilMult
+            end
+            -- Rapid Fire (halve fire rate)
+            if weaponModifiers.rapidFire then
+                config.FireRate = backup.FireRate * 0.35
+            else
+                config.FireRate = backup.FireRate
+            end
+            -- Instant Reload
+            if weaponModifiers.instantReload then
+                config.ReloadTime = 0.05
+            else
+                config.ReloadTime = backup.ReloadTime
+            end
+            -- Infinite Ammo (huge magazine)
+            if weaponModifiers.infiniteAmmo then
+                config.MagazineSize = 9999
+            else
+                config.MagazineSize = backup.MagazineSize
+            end
+            -- All Auto
+            if weaponModifiers.allAuto then
+                config.FireMode = "Auto"
+            else
+                config.FireMode = backup.FireMode
+            end
+        end
+    end
+end
+local function restoreWeaponConfigs()
+    for weaponName, backup in pairs(weaponConfigBackup) do
+        local config = GunConfig[weaponName]
+        if not config then continue end
+        config.Spread = backup.Spread
+        config.AimSpread = backup.AimSpread
+        config.FireRate = backup.FireRate
+        config.ReloadTime = backup.ReloadTime
+        config.MagazineSize = backup.MagazineSize
+        config.FireMode = backup.FireMode
+        config.Range = backup.Range
+        if config.Recoil and backup.Recoil then
+            config.Recoil.Kick = backup.Recoil.Kick
+            config.Recoil.Rot = backup.Recoil.Rot
+            config.Recoil.CameraKick = backup.Recoil.CameraKick
+        end
+        config.AimRecoilMult = backup.AimRecoilMult
+    end
+end
+-- FOV Circle
+local fovCircle = Drawing and Drawing.new("Circle") or nil
+if fovCircle then
+    fovCircle.Thickness = 1
+    fovCircle.NumSides = 64
+    fovCircle.Radius = aimbotFOV
+    fovCircle.Filled = false
+    fovCircle.Color = Color3.fromRGB(255, 50, 80)
+    fovCircle.Transparency = 0.6
+    fovCircle.Visible = false
+end
+-- ===================== ESP =====================
+local espFolder = Instance.new("Folder")
+espFolder.Name = ESP_FOLDER
+espFolder.Parent = CoreGui
+local function setupCharacterESP(player, char)
+    local hrp = char:WaitForChild("HumanoidRootPart", 5)
+    if not hrp then return end
+    local highlight = espFolder:FindFirstChild(player.Name .. "_HL")
+    if not highlight then
+        highlight = Instance.new("Highlight")
+        highlight.Name = player.Name .. "_HL"
+        highlight.FillTransparency = 0.3
+        highlight.OutlineTransparency = 0.1
+        highlight.FillColor = Color3.fromRGB(255, 50, 80)
+        highlight.OutlineColor = Color3.fromRGB(255, 100, 120)
+        highlight.Parent = espFolder
+    end
+    highlight.Adornee = char
+    local billboard = espFolder:FindFirstChild(player.Name .. "_BB")
+    if not billboard then
+        billboard = Instance.new("BillboardGui")
+        billboard.Name = player.Name .. "_BB"
+        billboard.AlwaysOnTop = true
+        billboard.Size = UDim2.new(0, 220, 0, 50)
+        billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+        billboard.Parent = espFolder
+        local label = Instance.new("TextLabel")
+        label.Name = "Label"
+        label.BackgroundTransparency = 1
+        label.Size = UDim2.new(1, 0, 1, 0)
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 14
+        label.TextStrokeTransparency = 0
+        label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        label.TextColor3 = Color3.fromRGB(255, 80, 100)
+        label.Parent = billboard
+    end
+    billboard.Adornee = hrp
+end
+local function createESP(player)
+    if player == LocalPlayer then return end
+    if player.Character then
+        task.spawn(setupCharacterESP, player, player.Character)
+    end
+    local conn = player.CharacterAdded:Connect(function(char)
+        task.spawn(setupCharacterESP, player, char)
+    end)
+    addConnection(conn)
+end
+local function removeESP(player)
+    local hl = espFolder:FindFirstChild(player.Name .. "_HL")
+    if hl then hl:Destroy() end
+    local bb = espFolder:FindFirstChild(player.Name .. "_BB")
+    if bb then bb:Destroy() end
+end
+local function clearAllESP()
+    espFolder:ClearAllChildren()
+end
+local function updateESP()
+    if not espEnabled then
+        clearAllESP()
+        return
+    end
+    local localChar = LocalPlayer.Character
+    local localHrp = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local highlight = espFolder:FindFirstChild(player.Name .. "_HL")
+            local billboard = espFolder:FindFirstChild(player.Name .. "_BB")
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                if not highlight or not billboard then
+                    setupCharacterESP(player, player.Character)
+                    highlight = espFolder:FindFirstChild(player.Name .. "_HL")
+                    billboard = espFolder:FindFirstChild(player.Name .. "_BB")
+                end
+            end
+            if highlight then
+                highlight.Enabled = true
+            end
+            if billboard then
+                billboard.Enabled = true
+                local label = billboard:FindFirstChild("Label")
+                if label then
+                    local distStr = ""
+                    if localHrp and player.Character then
+                        local targetHrp = player.Character:FindFirstChild("HumanoidRootPart")
+                        if targetHrp then
+                            local dist = math.floor((localHrp.Position - targetHrp.Position).Magnitude)
+                            distStr = string.format(" [%d studs]", dist)
+                        end
+                    end
+                    -- Show health
+                    local healthStr = ""
+                    if player.Character then
+                        local hum = player.Character:FindFirstChildOfClass("Humanoid")
+                        if hum then
+                            healthStr = string.format(" | HP: %d", math.floor(hum.Health))
+                        end
+                    end
+                    label.Text = player.Name .. distStr .. healthStr
+                    -- Color by distance
+                    if localHrp and player.Character then
+                        local targetHrp = player.Character:FindFirstChild("HumanoidRootPart")
+                        if targetHrp then
+                            local dist = (localHrp.Position - targetHrp.Position).Magnitude
+                            if dist < 50 then
+                                label.TextColor3 = Color3.fromRGB(255, 50, 50)
+                                highlight.FillColor = Color3.fromRGB(255, 50, 50)
+                                highlight.OutlineColor = Color3.fromRGB(255, 80, 80)
+                            elseif dist < 150 then
+                                label.TextColor3 = Color3.fromRGB(255, 180, 50)
+                                highlight.FillColor = Color3.fromRGB(255, 180, 50)
+                                highlight.OutlineColor = Color3.fromRGB(255, 200, 80)
+                            else
+                                label.TextColor3 = Color3.fromRGB(50, 255, 120)
+                                highlight.FillColor = Color3.fromRGB(50, 255, 120)
+                                highlight.OutlineColor = Color3.fromRGB(80, 255, 140)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+-- ===================== AIMBOT =====================
+local function isAlive(player)
+    local char = player.Character
+    if not char then return false end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    return humanoid.Health > 0
+end
+local function isVisible(targetPart)
+    local origin = Camera.CFrame.Position
+    local direction = (targetPart.Position - origin)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    local ignoreList = {}
+    if LocalPlayer.Character then
+        table.insert(ignoreList, LocalPlayer.Character)
+    end
+    rayParams.FilterDescendantsInstances = ignoreList
+    local result = workspace:Raycast(origin, direction, rayParams)
+    if result then
+        local hitChar = result.Instance:FindFirstAncestorOfClass("Model")
+        if hitChar and hitChar == targetPart:FindFirstAncestorOfClass("Model") then
+            return true
+        end
+        return false
+    end
+    return true
+end
+local function getClosestTarget()
+    local closest = nil
+    local closestDist = math.huge
+    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            if not isAlive(player) then continue end
+            local char = player.Character
+            if not char then continue end
+            local targetPart = char:FindFirstChild(aimbotTargetPart) or char:FindFirstChild("Head")
+            if not targetPart then continue end
+            local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+            if not onScreen then continue end
+            local screenPosV2 = Vector2.new(screenPos.X, screenPos.Y)
+            local distFromCenter = (screenPosV2 - screenCenter).Magnitude
+            if distFromCenter > aimbotFOV then continue end
+            if not isVisible(targetPart) then continue end
+            if distFromCenter < closestDist then
+                closestDist = distFromCenter
+                closest = player
+            end
+        end
+    end
+    return closest
+end
+local function updateAimbot()
+    if fovCircle then
+        fovCircle.Visible = aimbotEnabled and aimbotShowFOV
+        fovCircle.Radius = aimbotFOV
+        fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    end
+    if not aimbotEnabled then
+        aimbotCurrentTarget = nil
+        return
+    end
+    local isAiming = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+    if not isAiming then
+        aimbotCurrentTarget = nil
+        return
+    end
+    local target = getClosestTarget()
+    aimbotCurrentTarget = target
+    if target and target.Character then
+        local targetPart = target.Character:FindFirstChild(aimbotTargetPart) or target.Character:FindFirstChild("Head")
+        if targetPart then
+            local targetPos = targetPart.Position
+            local currentCF = Camera.CFrame
+            local targetCF = CFrame.lookAt(currentCF.Position, targetPos)
+            local smoothFactor = 1 / math.clamp(aimbotSmoothing, 1, 20)
+            Camera.CFrame = currentCF:Lerp(targetCF, smoothFactor)
+        end
+    end
+end
+local Packets = require(ReplicatedStorage.Modules.Network.Packets)
+local function grabAllMapItems()
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local originalCF = hrp.CFrame
+    
+    local itemsToGrab = {}
+    for _, desc in ipairs(workspace:GetDescendants()) do
+        if desc:IsA("ProximityPrompt") and desc.Enabled then
+            local path = desc:GetFullName()
+            if path:find("Items") or path:find("Interactables") or desc.ObjectText == "Bandage" or desc.ObjectText == "Bear Trap" or desc.ObjectText == "Bloxy Cola" or desc.ObjectText == "Pepper Spray" or desc.ObjectText == "Riot Shield" or desc.ObjectText == "Metal Pipe" then
+                table.insert(itemsToGrab, desc)
+            end
+        end
+    end
+    
+    if #itemsToGrab == 0 then return end
+    
+    task.spawn(function()
+        for _, prompt in ipairs(itemsToGrab) do
+            if prompt.Parent and prompt.Enabled then
+                hrp.CFrame = prompt.Parent:GetPivot()
+                task.wait(0.2)
+                if fireproximityprompt then
+                    fireproximityprompt(prompt)
+                else
+                    prompt:InputHoldBegin()
+                    task.wait(prompt.HoldDuration + 0.1)
+                    prompt:InputHoldEnd()
+                end
+                task.wait(0.2)
+            end
+        end
+        hrp.CFrame = originalCF
+    end)
+end
+local function getAllTools()
+    local tools = {}
+    local toolsFolder = ReplicatedStorage:FindFirstChild("Assets")
+    if toolsFolder then
+        toolsFolder = toolsFolder:FindFirstChild("Tools")
+    end
+    if toolsFolder then
+        for _, tool in ipairs(toolsFolder:GetChildren()) do
+            if tool:IsA("Tool") then
+                table.insert(tools, tool)
+            end
+        end
+    end
+    -- Also scan entire ReplicatedStorage for any other tools
+    for _, desc in ipairs(ReplicatedStorage:GetDescendants()) do
+        if desc:IsA("Tool") and desc.Parent ~= toolsFolder then
+            table.insert(tools, desc)
+        end
+    end
+    -- Check Lighting (some games hide tools here)
+    pcall(function()
+        for _, desc in ipairs(game:GetService("Lighting"):GetDescendants()) do
+            if desc:IsA("Tool") then
+                table.insert(tools, desc)
+            end
+        end
+    end)
+    return tools
+end
+local function giveItem(tool)
+    -- Fire the server-sided changeWeapon packet with the tool's name
+    -- Teleport bypass for Massacre
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local oldCF = hrp.CFrame
+        hrp.CFrame = CFrame.new(-47, -23, -237)
+        task.wait(0.2)
+        Packets.changeWeapon:Fire(tool.Name)
+        task.wait(0.3)
+        hrp.CFrame = oldCF
+    else
+        Packets.changeWeapon:Fire(tool.Name)
+    end
+end
+local function giveAllItems()
+    local tools = getAllTools()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local oldCF = hrp.CFrame
+        hrp.CFrame = CFrame.new(-47, -23, -237)
+        task.wait(0.2)
+        for i, tool in ipairs(tools) do
+            Packets.changeWeapon:Fire(tool.Name)
+            if i < #tools then
+                task.wait(0.15)
+            end
+        end
+        task.wait(0.3)
+        hrp.CFrame = oldCF
+    else
+        for i, tool in ipairs(tools) do
+            Packets.changeWeapon:Fire(tool.Name)
+            if i < #tools then
+                task.wait(0.15)
+            end
+        end
+    end
+end
+-- ===================== INIT ESP =====================
+for _, player in ipairs(Players:GetPlayers()) do
+    createESP(player)
+end
+addConnection(Players.PlayerAdded:Connect(createESP))
+addConnection(Players.PlayerRemoving:Connect(removeESP))
+local loopActive = true
+task.spawn(function()
+    while loopActive do
+        updateESP()
+        task.wait(0.8)
+    end
+end)
+-- Heartbeat loops
+local renderConn = RunService.RenderStepped:Connect(function()
+    if loopActive then
+        updateAimbot()
+    end
+end)
+addConnection(renderConn)
+-- Cleanup entry
+table.insert(_G.MassacreHack_Connections, {
+    Connected = true,
+    Disconnect = function(self)
+        loopActive = false
+        self.Connected = false
+        if fovCircle then
+            fovCircle.Visible = false
+            fovCircle:Remove()
+        end
+        clearAllESP()
+        restoreWeaponConfigs()
+    end
+})
+-- ===================== UI =====================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = GUI_NAME
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = CoreGui
+-- Theme colors
+local THEME = {
+    bg = Color3.fromRGB(12, 12, 18),
+    panel = Color3.fromRGB(18, 18, 28),
+    accent = Color3.fromRGB(255, 50, 80),
+    accentDim = Color3.fromRGB(180, 30, 55),
+    text = Color3.fromRGB(230, 230, 240),
+    textDim = Color3.fromRGB(120, 122, 145),
+    border = Color3.fromRGB(35, 35, 50),
+    toggleOn = Color3.fromRGB(255, 50, 80),
+    toggleOff = Color3.fromRGB(40, 42, 56),
+    itemBtn = Color3.fromRGB(25, 25, 38),
+    itemBtnHover = Color3.fromRGB(35, 35, 52),
+}
+-- Draggable
+local function makeDraggable(frame, target)
+    local dragging, dragStart, startPos
+    frame.InputBegan:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and UserInputService:GetFocusedTextBox() == nil then
+            dragging = true
+            dragStart = input.Position
+            startPos = target.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    frame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            if dragging then
+                local delta = input.Position - dragStart
+                target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+end
+-- Main Frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.Position = UDim2.new(0.5, 0, 0.45, 0)
+mainFrame.Size = UDim2.new(0, 420, 0, 400)
+mainFrame.BackgroundColor3 = THEME.bg
+mainFrame.BorderSizePixel = 0
+mainFrame.ClipsDescendants = true
+mainFrame.Parent = screenGui
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 14)
+mainCorner.Parent = mainFrame
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = THEME.accent
+mainStroke.Thickness = 1.5
+mainStroke.Transparency = 0.5
+mainStroke.Parent = mainFrame
+-- Glow gradient on border
+local mainGrad = Instance.new("UIGradient")
+mainGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 50, 80)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(180, 30, 60)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 50, 80)),
+})
+mainGrad.Rotation = 45
+mainGrad.Parent = mainStroke
+-- Title bar
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.BackgroundColor3 = THEME.panel
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 14)
+titleCorner.Parent = titleBar
+-- Fix bottom corners of title bar
+local titleFix = Instance.new("Frame")
+titleFix.Size = UDim2.new(1, 0, 0, 14)
+titleFix.Position = UDim2.new(0, 0, 1, -14)
+titleFix.BackgroundColor3 = THEME.panel
+titleFix.BorderSizePixel = 0
+titleFix.Parent = titleBar
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -20, 1, 0)
+titleLabel.Position = UDim2.new(0, 14, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Font = Enum.Font.GothamBlack
+titleLabel.Text = "MASSACRE"
+titleLabel.TextColor3 = THEME.accent
+titleLabel.TextSize = 16
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = titleBar
+local subtitleLabel = Instance.new("TextLabel")
+subtitleLabel.Size = UDim2.new(0, 100, 1, 0)
+subtitleLabel.Position = UDim2.new(1, -110, 0, 0)
+subtitleLabel.BackgroundTransparency = 1
+subtitleLabel.Font = Enum.Font.Gotham
+subtitleLabel.Text = "MULTIHACK"
+subtitleLabel.TextColor3 = THEME.textDim
+subtitleLabel.TextSize = 10
+subtitleLabel.TextXAlignment = Enum.TextXAlignment.Right
+subtitleLabel.Parent = titleBar
+local titleLine = Instance.new("Frame")
+titleLine.Size = UDim2.new(1, 0, 0, 1)
+titleLine.Position = UDim2.new(0, 0, 1, 0)
+titleLine.BackgroundColor3 = THEME.border
+titleLine.BorderSizePixel = 0
+titleLine.Parent = titleBar
+makeDraggable(titleBar, mainFrame)
+-- Tab bar
+local tabBar = Instance.new("Frame")
+tabBar.Name = "TabBar"
+tabBar.Size = UDim2.new(1, 0, 0, 32)
+tabBar.Position = UDim2.new(0, 0, 0, 40)
+tabBar.BackgroundTransparency = 1
+tabBar.Parent = mainFrame
+local tabLine = Instance.new("Frame")
+tabLine.Size = UDim2.new(1, 0, 0, 1)
+tabLine.Position = UDim2.new(0, 0, 1, 0)
+tabLine.BackgroundColor3 = THEME.border
+tabLine.BorderSizePixel = 0
+tabLine.Parent = tabBar
+local tabNames = {"ITEMS", "ESP", "AIMBOT", "WEAPONS"}
+local tabButtons = {}
+local tabContainers = {}
+local numTabs = #tabNames
+local activeIndicator = Instance.new("Frame")
+activeIndicator.Name = "Indicator"
+activeIndicator.Size = UDim2.new(1/numTabs, -10, 0, 2)
+activeIndicator.Position = UDim2.new(0, 5, 1, -2)
+activeIndicator.BackgroundColor3 = THEME.accent
+activeIndicator.BorderSizePixel = 0
+activeIndicator.Parent = tabBar
+local indCorner = Instance.new("UICorner")
+indCorner.CornerRadius = UDim.new(1, 0)
+indCorner.Parent = activeIndicator
+local contentFrame = Instance.new("Frame")
+contentFrame.Name = "Content"
+contentFrame.Size = UDim2.new(1, 0, 1, -72)
+contentFrame.Position = UDim2.new(0, 0, 0, 72)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainFrame
+for i, tabName in ipairs(tabNames) do
+    local btn = Instance.new("TextButton")
+    btn.Name = tabName .. "Tab"
+    btn.Size = UDim2.new(1/numTabs, 0, 1, 0)
+    btn.Position = UDim2.new((i-1)/numTabs, 0, 0, 0)
+    btn.BackgroundTransparency = 1
+    btn.Font = Enum.Font.GothamBold
+    btn.Text = tabName
+    btn.TextColor3 = i == 1 and THEME.text or THEME.textDim
+    btn.TextSize = 10
+    btn.Parent = tabBar
+    tabButtons[i] = btn
+    local container = Instance.new("ScrollingFrame")
+    container.Name = tabName .. "Container"
+    container.Size = UDim2.new(1, 0, 1, 0)
+    container.BackgroundTransparency = 1
+    container.Visible = i == 1
+    container.ScrollBarThickness = 3
+    container.ScrollBarImageColor3 = THEME.accent
+    container.CanvasSize = UDim2.new(0, 0, 0, 0)
+    container.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    container.BorderSizePixel = 0
+    container.Parent = contentFrame
+    tabContainers[i] = container
+    btn.MouseButton1Click:Connect(function()
+        for j, c in ipairs(tabContainers) do
+            c.Visible = j == i
+            TweenService:Create(tabButtons[j], TweenInfo.new(0.2), {
+                TextColor3 = j == i and THEME.text or THEME.textDim
+            }):Play()
+        end
+        TweenService:Create(activeIndicator, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Position = UDim2.new((i-1)/numTabs, 5, 1, -2)
+        }):Play()
+    end)
+end
+local itemsContainer = tabContainers[1]
+local espContainer = tabContainers[2]
+local aimbotContainer = tabContainers[3]
+local weaponsContainer = tabContainers[4]
+-- ===================== UI HELPERS =====================
+local function createToggleRow(parent, name, labelText, yOffset, defaultState, callback)
+    local container = Instance.new("Frame")
+    container.Name = name
+    container.Size = UDim2.new(0.92, 0, 0, 38)
+    container.Position = UDim2.new(0.04, 0, 0, yOffset)
+    container.BackgroundTransparency = 1
+    container.Parent = parent
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.65, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.Text = labelText
+    label.TextColor3 = THEME.text
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = container
+    local switchBg = Instance.new("TextButton")
+    switchBg.Name = "Switch"
+    switchBg.Size = UDim2.new(0, 46, 0, 24)
+    switchBg.Position = UDim2.new(1, -46, 0.5, -12)
+    switchBg.BackgroundColor3 = defaultState and THEME.toggleOn or THEME.toggleOff
+    switchBg.Text = ""
+    switchBg.AutoButtonColor = false
+    switchBg.Parent = container
+    local sc = Instance.new("UICorner")
+    sc.CornerRadius = UDim.new(1, 0)
+    sc.Parent = switchBg
+    local ss = Instance.new("UIStroke")
+    ss.Color = THEME.border
+    ss.Thickness = 1
+    ss.Parent = switchBg
+    local slider = Instance.new("Frame")
+    slider.Name = "Knob"
+    slider.Size = UDim2.new(0, 18, 0, 18)
+    slider.Position = defaultState and UDim2.new(0, 25, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
+    slider.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    slider.BorderSizePixel = 0
+    slider.Parent = switchBg
+    local slc = Instance.new("UICorner")
+    slc.CornerRadius = UDim.new(1, 0)
+    slc.Parent = slider
+    local active = defaultState
+    switchBg.MouseButton1Click:Connect(function()
+        active = not active
+        TweenService:Create(slider, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
+            Position = active and UDim2.new(0, 25, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
+        }):Play()
+        TweenService:Create(switchBg, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
+            BackgroundColor3 = active and THEME.toggleOn or THEME.toggleOff
+        }):Play()
+        callback(active)
+    end)
+end
+local function createSliderRow(parent, name, labelText, yOffset, defaultValue, minVal, maxVal, step, formatStr, callback)
+    local container = Instance.new("Frame")
+    container.Name = name
+    container.Size = UDim2.new(0.92, 0, 0, 38)
+    container.Position = UDim2.new(0.04, 0, 0, yOffset)
+    container.BackgroundTransparency = 1
+    container.Parent = parent
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.38, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.Text = labelText
+    label.TextColor3 = THEME.text
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = container
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(0.42, 0, 0, 6)
+    sliderBg.Position = UDim2.new(0.40, 0, 0.5, -3)
+    sliderBg.BackgroundColor3 = THEME.toggleOff
+    sliderBg.BorderSizePixel = 0
+    sliderBg.Parent = container
+    local sbgc = Instance.new("UICorner")
+    sbgc.CornerRadius = UDim.new(1, 0)
+    sbgc.Parent = sliderBg
+    local sliderFill = Instance.new("Frame")
+    sliderFill.Size = UDim2.new(0, 0, 1, 0)
+    sliderFill.BackgroundColor3 = THEME.accent
+    sliderFill.BorderSizePixel = 0
+    sliderFill.Parent = sliderBg
+    local sfc = Instance.new("UICorner")
+    sfc.CornerRadius = UDim.new(1, 0)
+    sfc.Parent = sliderFill
+    local handle = Instance.new("ImageButton")
+    handle.Size = UDim2.new(0, 14, 0, 14)
+    handle.AnchorPoint = Vector2.new(0.5, 0.5)
+    handle.Position = UDim2.new(0, 0, 0.5, 0)
+    handle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    handle.BorderSizePixel = 0
+    handle.Parent = sliderBg
+    local hc = Instance.new("UICorner")
+    hc.CornerRadius = UDim.new(1, 0)
+    hc.Parent = handle
+    local valLabel = Instance.new("TextLabel")
+    valLabel.Size = UDim2.new(0.16, 0, 1, 0)
+    valLabel.Position = UDim2.new(0.84, 0, 0, 0)
+    valLabel.BackgroundTransparency = 1
+    valLabel.Font = Enum.Font.GothamBold
+    valLabel.Text = ""
+    valLabel.TextColor3 = THEME.text
+    valLabel.TextSize = 11
+    valLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valLabel.Parent = container
+    local value = defaultValue
+    local function update(pct)
+        local rawVal = minVal + (maxVal - minVal) * pct
+        value = math.clamp(math.round(rawVal / step) * step, minVal, maxVal)
+        if step >= 1 then value = math.round(value) end
+        local visualPct = (value - minVal) / (maxVal - minVal)
+        handle.Position = UDim2.new(visualPct, 0, 0.5, 0)
+        sliderFill.Size = UDim2.new(visualPct, 0, 1, 0)
+        valLabel.Text = string.format(formatStr, value)
+        callback(value)
+    end
+    update((defaultValue - minVal) / (maxVal - minVal))
+    local dragging = false
+    local function processInput(input)
+        local inputX = input.Position.X
+        local sx = sliderBg.AbsolutePosition.X
+        local sw = sliderBg.AbsoluteSize.X
+        local pct = math.clamp((inputX - sx) / sw, 0, 1)
+        update(pct)
+    end
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            processInput(input)
+        end
+    end)
+    sliderBg.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            processInput(input)
+            dragging = true
+        end
+    end)
+end
+local function createCycleRow(parent, name, labelText, yOffset, options, defaultIndex, callback)
+    local container = Instance.new("Frame")
+    container.Name = name
+    container.Size = UDim2.new(0.92, 0, 0, 38)
+    container.Position = UDim2.new(0.04, 0, 0, yOffset)
+    container.BackgroundTransparency = 1
+    container.Parent = parent
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.45, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.Text = labelText
+    label.TextColor3 = THEME.text
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = container
+    local controlBg = Instance.new("Frame")
+    controlBg.Size = UDim2.new(0, 150, 0, 28)
+    controlBg.Position = UDim2.new(1, -150, 0.5, -14)
+    controlBg.BackgroundColor3 = THEME.itemBtn
+    controlBg.BorderSizePixel = 0
+    controlBg.Parent = container
+    local cc = Instance.new("UICorner")
+    cc.CornerRadius = UDim.new(0, 6)
+    cc.Parent = controlBg
+    local cs = Instance.new("UIStroke")
+    cs.Color = THEME.border
+    cs.Thickness = 1
+    cs.Parent = controlBg
+    local idx = defaultIndex
+    local prevBtn = Instance.new("TextButton")
+    prevBtn.Size = UDim2.new(0, 28, 1, 0)
+    prevBtn.BackgroundTransparency = 1
+    prevBtn.Font = Enum.Font.GothamBold
+    prevBtn.Text = "<"
+    prevBtn.TextColor3 = THEME.accent
+    prevBtn.TextSize = 14
+    prevBtn.Parent = controlBg
+    local nextBtn = Instance.new("TextButton")
+    nextBtn.Size = UDim2.new(0, 28, 1, 0)
+    nextBtn.Position = UDim2.new(1, -28, 0, 0)
+    nextBtn.BackgroundTransparency = 1
+    nextBtn.Font = Enum.Font.GothamBold
+    nextBtn.Text = ">"
+    nextBtn.TextColor3 = THEME.accent
+    nextBtn.TextSize = 14
+    nextBtn.Parent = controlBg
+    local valLabel = Instance.new("TextLabel")
+    valLabel.Size = UDim2.new(1, -56, 1, 0)
+    valLabel.Position = UDim2.new(0, 28, 0, 0)
+    valLabel.BackgroundTransparency = 1
+    valLabel.Font = Enum.Font.GothamBold
+    valLabel.Text = options[idx]
+    valLabel.TextColor3 = THEME.text
+    valLabel.TextSize = 11
+    valLabel.Parent = controlBg
+    prevBtn.MouseButton1Click:Connect(function()
+        idx = idx - 1
+        if idx < 1 then idx = #options end
+        valLabel.Text = options[idx]
+        callback(options[idx])
+    end)
+    nextBtn.MouseButton1Click:Connect(function()
+        idx = idx + 1
+        if idx > #options then idx = 1 end
+        valLabel.Text = options[idx]
+        callback(options[idx])
+    end)
+end
+-- ===================== POPULATE: ITEMS TAB =====================
+-- "Give All" button at top
+local giveAllBtn = Instance.new("TextButton")
+giveAllBtn.Name = "GiveAll"
+giveAllBtn.Size = UDim2.new(0.92, 0, 0, 36)
+giveAllBtn.Position = UDim2.new(0.04, 0, 0, 8)
+giveAllBtn.BackgroundColor3 = THEME.accent
+giveAllBtn.Font = Enum.Font.GothamBlack
+giveAllBtn.Text = "⚡ GIVE ALL WEAPONS"
+giveAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+giveAllBtn.TextSize = 13
+giveAllBtn.AutoButtonColor = false
+giveAllBtn.Parent = itemsContainer
+local giveAllCorner = Instance.new("UICorner")
+giveAllCorner.CornerRadius = UDim.new(0, 8)
+giveAllCorner.Parent = giveAllBtn
+giveAllBtn.MouseEnter:Connect(function()
+    TweenService:Create(giveAllBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(255, 80, 110)}):Play()
+end)
+giveAllBtn.MouseLeave:Connect(function()
+    TweenService:Create(giveAllBtn, TweenInfo.new(0.15), {BackgroundColor3 = THEME.accent}):Play()
+end)
+giveAllBtn.MouseButton1Click:Connect(function()
+    giveAllItems()
+    -- Flash feedback
+    TweenService:Create(giveAllBtn, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(50, 255, 120)}):Play()
+    task.wait(0.3)
+    TweenService:Create(giveAllBtn, TweenInfo.new(0.2), {BackgroundColor3 = THEME.accent}):Play()
+end)
+-- "Tele-Grab Map Items" button
+local grabMapBtn = Instance.new("TextButton")
+grabMapBtn.Name = "GrabMapItems"
+grabMapBtn.Size = UDim2.new(0.92, 0, 0, 36)
+grabMapBtn.Position = UDim2.new(0.04, 0, 0, 48)
+grabMapBtn.BackgroundColor3 = THEME.accent
+grabMapBtn.Font = Enum.Font.GothamBlack
+grabMapBtn.Text = "🎒 TELE-GRAB MAP ITEMS"
+grabMapBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+grabMapBtn.TextSize = 13
+grabMapBtn.AutoButtonColor = false
+grabMapBtn.Parent = itemsContainer
+local grabCorner = Instance.new("UICorner")
+grabCorner.CornerRadius = UDim.new(0, 8)
+grabCorner.Parent = grabMapBtn
+grabMapBtn.MouseEnter:Connect(function()
+    TweenService:Create(grabMapBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(255, 80, 110)}):Play()
+end)
+grabMapBtn.MouseLeave:Connect(function()
+    TweenService:Create(grabMapBtn, TweenInfo.new(0.15), {BackgroundColor3 = THEME.accent}):Play()
+end)
+grabMapBtn.MouseButton1Click:Connect(function()
+    grabAllMapItems()
+    TweenService:Create(grabMapBtn, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(50, 255, 120)}):Play()
+    task.wait(0.3)
+    TweenService:Create(grabMapBtn, TweenInfo.new(0.2), {BackgroundColor3 = THEME.accent}):Play()
+end)
+-- Individual item buttons
+local allTools = getAllTools()
+local yPos = 92
+for i, tool in ipairs(allTools) do
+    local itemBtn = Instance.new("TextButton")
+    itemBtn.Name = "Item_" .. tool.Name
+    itemBtn.Size = UDim2.new(0.92, 0, 0, 32)
+    itemBtn.Position = UDim2.new(0.04, 0, 0, yPos)
+    itemBtn.BackgroundColor3 = THEME.itemBtn
+    itemBtn.Font = Enum.Font.GothamBold
+    itemBtn.Text = "  🔫  " .. tool.Name
+    itemBtn.TextColor3 = THEME.text
+    itemBtn.TextSize = 12
+    itemBtn.TextXAlignment = Enum.TextXAlignment.Left
+    itemBtn.AutoButtonColor = false
+    itemBtn.Parent = itemsContainer
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = itemBtn
+    local btnStroke = Instance.new("UIStroke")
+    btnStroke.Color = THEME.border
+    btnStroke.Thickness = 1
+    btnStroke.Parent = itemBtn
+    itemBtn.MouseEnter:Connect(function()
+        TweenService:Create(itemBtn, TweenInfo.new(0.12), {BackgroundColor3 = THEME.itemBtnHover}):Play()
+        TweenService:Create(btnStroke, TweenInfo.new(0.12), {Color = THEME.accent}):Play()
+    end)
+    itemBtn.MouseLeave:Connect(function()
+        TweenService:Create(itemBtn, TweenInfo.new(0.12), {BackgroundColor3 = THEME.itemBtn}):Play()
+        TweenService:Create(btnStroke, TweenInfo.new(0.12), {Color = THEME.border}):Play()
+    end)
+    itemBtn.MouseButton1Click:Connect(function()
+        giveItem(tool)
+        TweenService:Create(itemBtn, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(50, 255, 120)}):Play()
+        task.wait(0.25)
+        TweenService:Create(itemBtn, TweenInfo.new(0.15), {BackgroundColor3 = THEME.itemBtn}):Play()
+    end)
+    yPos = yPos + 38
+end
+-- "Refresh Items" button at bottom
+local refreshBtn = Instance.new("TextButton")
+refreshBtn.Name = "Refresh"
+refreshBtn.Size = UDim2.new(0.92, 0, 0, 30)
+refreshBtn.Position = UDim2.new(0.04, 0, 0, yPos + 6)
+refreshBtn.BackgroundColor3 = THEME.toggleOff
+refreshBtn.Font = Enum.Font.GothamBold
+refreshBtn.Text = "🔄 Refresh Item List"
+refreshBtn.TextColor3 = THEME.textDim
+refreshBtn.TextSize = 11
+refreshBtn.AutoButtonColor = false
+refreshBtn.Parent = itemsContainer
+local refCorner = Instance.new("UICorner")
+refCorner.CornerRadius = UDim.new(0, 6)
+refCorner.Parent = refreshBtn
+refreshBtn.MouseButton1Click:Connect(function()
+    -- Remove old item buttons
+    for _, child in ipairs(itemsContainer:GetChildren()) do
+        if child.Name:sub(1, 5) == "Item_" then
+            child:Destroy()
+        end
+    end
+    -- Re-scan and rebuild
+    local newTools = getAllTools()
+    local newY = 92
+    for _, tool in ipairs(newTools) do
+        local ib = Instance.new("TextButton")
+        ib.Name = "Item_" .. tool.Name
+        ib.Size = UDim2.new(0.92, 0, 0, 32)
+        ib.Position = UDim2.new(0.04, 0, 0, newY)
+        ib.BackgroundColor3 = THEME.itemBtn
+        ib.Font = Enum.Font.GothamBold
+        ib.Text = "  🔫  " .. tool.Name
+        ib.TextColor3 = THEME.text
+        ib.TextSize = 12
+        ib.TextXAlignment = Enum.TextXAlignment.Left
+        ib.AutoButtonColor = false
+        ib.Parent = itemsContainer
+        local bc = Instance.new("UICorner")
+        bc.CornerRadius = UDim.new(0, 6)
+        bc.Parent = ib
+        local bs = Instance.new("UIStroke")
+        bs.Color = THEME.border
+        bs.Thickness = 1
+        bs.Parent = ib
+        ib.MouseEnter:Connect(function()
+            TweenService:Create(ib, TweenInfo.new(0.12), {BackgroundColor3 = THEME.itemBtnHover}):Play()
+        end)
+        ib.MouseLeave:Connect(function()
+            TweenService:Create(ib, TweenInfo.new(0.12), {BackgroundColor3 = THEME.itemBtn}):Play()
+        end)
+        ib.MouseButton1Click:Connect(function()
+            giveItem(tool)
+            TweenService:Create(ib, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(50, 255, 120)}):Play()
+            task.wait(0.25)
+            TweenService:Create(ib, TweenInfo.new(0.15), {BackgroundColor3 = THEME.itemBtn}):Play()
+        end)
+        newY = newY + 38
+    end
+    refreshBtn.Position = UDim2.new(0.04, 0, 0, newY + 6)
+end)
+-- ===================== POPULATE: ESP TAB =====================
+createToggleRow(espContainer, "ESPToggle", "Player ESP", 10, true, function(state)
+    espEnabled = state
+    updateESP()
+end)
+-- ===================== POPULATE: AIMBOT TAB =====================
+createToggleRow(aimbotContainer, "AimbotToggle", "Enable Aimbot", 10, false, function(state)
+    aimbotEnabled = state
+end)
+createSliderRow(aimbotContainer, "FOV", "FOV Radius", 54, 150, 20, 500, 10, "%dpx", function(val)
+    aimbotFOV = val
+end)
+createSliderRow(aimbotContainer, "Smooth", "Smoothness", 98, 5, 1, 20, 1, "%d", function(val)
+    aimbotSmoothing = val
+end)
+createCycleRow(aimbotContainer, "TargetPart", "Target Part", 142, {"Head", "UpperTorso", "HumanoidRootPart"}, 1, function(val)
+    aimbotTargetPart = val
+end)
+createToggleRow(aimbotContainer, "ShowFOV", "Show FOV Circle", 186, true, function(state)
+    aimbotShowFOV = state
+end)
+-- ===================== POPULATE: WEAPONS TAB =====================
+createToggleRow(weaponsContainer, "NoSpread", "No Spread", 10, false, function(state)
+    weaponModifiers.noSpread = state
+    applyWeaponModifiers()
+end)
+createToggleRow(weaponsContainer, "NoRecoil", "No Recoil", 52, false, function(state)
+    weaponModifiers.noRecoil = state
+    applyWeaponModifiers()
+end)
+createToggleRow(weaponsContainer, "RapidFire", "Rapid Fire (3x)", 94, false, function(state)
+    weaponModifiers.rapidFire = state
+    applyWeaponModifiers()
+end)
+createToggleRow(weaponsContainer, "InstantReload", "Instant Reload", 136, false, function(state)
+    weaponModifiers.instantReload = state
+    applyWeaponModifiers()
+end)
+createToggleRow(weaponsContainer, "InfiniteAmmo", "Infinite Ammo", 178, false, function(state)
+    weaponModifiers.infiniteAmmo = state
+    applyWeaponModifiers()
+end)
+createToggleRow(weaponsContainer, "AllAuto", "All Guns Full-Auto", 220, false, function(state)
+    weaponModifiers.allAuto = state
+    applyWeaponModifiers()
+end)
+createToggleRow(weaponsContainer, "MeleeRangeBypass", "Melee Range Bypass", 262, false, function(state)
+    meleeModifiers.rangeEnabled = state
+    applyWeaponModifiers()
+end)
+createSliderRow(weaponsContainer, "MeleeRangeValue", "Melee Range Value", 304, 15, 8, 100, 1, "%d", function(val)
+    meleeModifiers.rangeValue = val
+    applyWeaponModifiers()
+end)
+createToggleRow(weaponsContainer, "MeleeSpeedHack", "Melee Speed Hack", 346, false, function(state)
+    meleeModifiers.speedEnabled = state
+    applyWeaponModifiers()
+end)
+createSliderRow(weaponsContainer, "MeleeSpeedDelay", "Melee Speed Delay", 388, 0.2, 0.05, 1.5, 0.05, "%.2f", function(val)
+    meleeModifiers.speedValue = val
+    applyWeaponModifiers()
+end)
+createToggleRow(weaponsContainer, "MeleeAutoSwing", "Melee Auto Swing", 430, false, function(state)
+    meleeModifiers.allAuto = state
+    applyWeaponModifiers()
+end)
+-- ===================== FOOTER =====================
+local footer = Instance.new("TextLabel")
+footer.Size = UDim2.new(1, 0, 0, 20)
+footer.Position = UDim2.new(0, 0, 1, -20)
+footer.BackgroundTransparency = 1
+footer.Font = Enum.Font.Gotham
+footer.Text = "RMB to aim | Toggle UI: ]"
+footer.TextColor3 = THEME.textDim
+footer.TextSize = 10
+footer.Parent = mainFrame
+-- Toggle visibility with ]
+local menuVisible = true
+addConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.RightBracket then
+        menuVisible = not menuVisible
+        mainFrame.Visible = menuVisible
+    end
+end))

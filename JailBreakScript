@@ -49,6 +49,12 @@ pcall(function()
 end)
 -- ===================== STATE =====================
 local espEnabled = true
+local espShowHighlight = true
+local espShowNames = true
+local espShowDistance = true
+local espShowBounty = true
+local espHighlightFillTransparency = 0.25
+local espHighlightOutlineTransparency = 0.2
 local infiniteJumpEnabled = false
 -- Player Properties
 local customWalkSpeed = 16
@@ -214,8 +220,8 @@ local function setupCharacter(player, char)
     if not highlight then
         highlight = Instance.new("Highlight")
         highlight.Name = player.Name .. "_Highlight"
-        highlight.FillTransparency = 0.25
-        highlight.OutlineTransparency = 0.2
+        highlight.FillTransparency = espHighlightFillTransparency
+        highlight.OutlineTransparency = espHighlightOutlineTransparency
         highlight.Parent = espFolder
     end
     highlight.Adornee = char
@@ -278,32 +284,35 @@ local function updateESP()
                 end
             end
             if highlight then
-                highlight.Enabled = true
+                highlight.Enabled = espShowHighlight
+                highlight.FillTransparency = espHighlightFillTransparency
+                highlight.OutlineTransparency = espHighlightOutlineTransparency
                 local bounty = bounties[player.Name] or 0
                 local color = getBountyColor(bounty)
                 highlight.FillColor = color
                 highlight.OutlineColor = color
             end
             if billboard then
-                billboard.Enabled = true
+                billboard.Enabled = espShowNames or espShowDistance or espShowBounty
                 local label = billboard:FindFirstChild("Label")
                 if label then
                     local bounty = bounties[player.Name] or 0
                     local color = getBountyColor(bounty)
                     label.TextColor3 = color
+                    local nameStr = espShowNames and player.Name or ""
                     local distStr = ""
-                    if localHrp and player.Character then
+                    if espShowDistance and localHrp and player.Character then
                         local targetHrp = player.Character:FindFirstChild("HumanoidRootPart")
                         if targetHrp then
                             local distance = math.floor((localHrp.Position - targetHrp.Position).Magnitude)
                             distStr = string.format(" [%d studs]", distance)
                         end
                     end
-                    if bounty > 0 then
-                        label.Text = string.format("%s%s\nBounty: $%d", player.Name, distStr, bounty)
-                    else
-                        label.Text = player.Name .. distStr
+                    local bountyStr = ""
+                    if espShowBounty and bounty > 0 then
+                        bountyStr = string.format("\nBounty: $%d", bounty)
                     end
+                    label.Text = nameStr .. distStr .. bountyStr
                 end
             end
         end
@@ -1700,19 +1709,40 @@ createToggleRow(playerContainer, "BountyESP", "Master ESP", 10, true, function(s
     espEnabled = state
     updateESP()
 end)
-createToggleRow(playerContainer, "InfiniteJump", "Infinite Jump", 52, false, function(state)
+createToggleRow(playerContainer, "ShowHighlight", "ESP Show Highlight", 52, true, function(state)
+    espShowHighlight = state
+    updateESP()
+end)
+createToggleRow(playerContainer, "ShowNames", "ESP Show Names", 94, true, function(state)
+    espShowNames = state
+    updateESP()
+end)
+createToggleRow(playerContainer, "ShowDistance", "ESP Show Distance", 136, true, function(state)
+    espShowDistance = state
+    updateESP()
+end)
+createToggleRow(playerContainer, "ShowBounty", "ESP Show Bounty", 178, true, function(state)
+    espShowBounty = state
+    updateESP()
+end)
+createAdjusterRow(playerContainer, "HighlightTransparency", "ESP Highlight Transparency", 220, 0.25, 0.0, 1.0, 0.05, "%.2f", function(val)
+    espHighlightFillTransparency = val
+    espHighlightOutlineTransparency = val * 0.8
+    updateESP()
+end)
+createToggleRow(playerContainer, "InfiniteJump", "Infinite Jump", 262, false, function(state)
     toggleInfiniteJump(state)
 end)
-createAdjusterRow(playerContainer, "WalkSpeed", "Walk Speed", 94, 16, 16, 100, 2, "%d studs", function(val)
+createAdjusterRow(playerContainer, "WalkSpeed", "Walk Speed", 304, 16, 16, 100, 2, "%d studs", function(val)
     customWalkSpeed = val
 end)
-createToggleRow(playerContainer, "NoSlow", "No Damage Slow", 136, false, function(state)
+createToggleRow(playerContainer, "NoSlow", "No Damage Slow", 346, false, function(state)
     noSlowEnabled = state
 end)
-createToggleRow(playerContainer, "InstantArrest", "Instant Arrest (Mobile Tap)", 178, false, function(state)
+createToggleRow(playerContainer, "InstantArrest", "Instant Arrest (Mobile Tap)", 388, false, function(state)
     instantArrestEnabled = state
 end)
-createAdjusterRow(playerContainer, "GameVolume", "Game Volume", 220, 1.0, 0.0, 2.0, 0.1, "%.1fx", function(val)
+createAdjusterRow(playerContainer, "GameVolume", "Game Volume", 430, 1.0, 0.0, 2.0, 0.1, "%.1fx", function(val)
     audioVolumeMultiplier = val
     updateAllSoundsVolume()
 end)

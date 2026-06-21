@@ -104,10 +104,13 @@ local weaponModifiers = {
 }
 -- Auto Features
 local autoArrestEnabled = false
-local autoRobEnabled = false
-local autoDoorsEnabled = false
+local autoAssistRobberyEnabled = false
+local actualAutoRobEnabled = false
+local bypassDoorsEnabled = false
+local cachedWorkspaceDoors = {}
+local _doorBypassConn = nil
 local autoArrestRange = 15
-local autoRobRange = 20
+local autoAssistRange = 20
 -- Cached module references (lazy-loaded)
 local _cachedUIModule = nil
 local _cachedDoorUtils = nil
@@ -967,28 +970,28 @@ local function doAutoArrest()
         end
     end)
 end
--- ===================== AUTO ROB =====================
-local _lastAutoRobTick = 0
-local _robHoldStartTime = nil
-local ROB_ACTION_KEYWORDS = {
+-- ===================== AUTO ASSIST =====================
+local _lastAutoAssistTick = 0
+local _assistHoldStartTime = nil
+local ASSIST_ACTION_KEYWORDS = {
     "collect", "rob", "dynamite", "lever", "hack", "open", "vault",
     "safe", "bag", "keycard", "crack", "drill", "grab", "steal",
     "break", "smash", "switch", "sit", "rope", "hatch",
     "inspect", "pick", "enter"
 }
-local function isRobAction(name)
+local function isAssistAction(name)
     if not name then return false end
     local lower = string.lower(name)
-    for _, keyword in ipairs(ROB_ACTION_KEYWORDS) do
+    for _, keyword in ipairs(ASSIST_ACTION_KEYWORDS) do
         if string.find(lower, keyword) then
             return true
         end
     end
     return false
 end
-local function doAutoRob()
-    if not autoRobEnabled then
-        _robHoldStartTime = nil
+local function doAutoAssistRobbery()
+    if not autoAssistRobberyEnabled then
+        _assistHoldStartTime = nil
         return
     end
     local UIModule = getUIModule()
@@ -997,104 +1000,417 @@ local function doAutoRob()
     if not CircleAction then return end
     local spec = CircleAction.Spec
     if not spec then
-        _robHoldStartTime = nil
+        _assistHoldStartTime = nil
         return
     end
     if spec.Enabled == false then
-        _robHoldStartTime = nil
+        _assistHoldStartTime = nil
         return
     end
     if not spec.Callback then
-        _robHoldStartTime = nil
+        _assistHoldStartTime = nil
         return
     end
-    local shouldRob = isRobAction(spec.Name)
-    if not shouldRob and spec.Timed and not spec.Name then
-        shouldRob = true
+    local shouldAssist = isAssistAction(spec.Name)
+    if not shouldAssist and spec.Timed and not spec.Name then
+        shouldAssist = true
     end
-    if not shouldRob then
-        _robHoldStartTime = nil
+    if not shouldAssist then
+        _assistHoldStartTime = nil
         return
     end
     if spec.Timed then
         if not spec.Pressed then
             CircleAction.Press()
-            _robHoldStartTime = tick()
+            _assistHoldStartTime = tick()
         end
     else
-        if tick() - _lastAutoRobTick > 1.0 then
+        if tick() - _lastAutoAssistTick > 1.0 then
             CircleAction.Press()
-            _lastAutoRobTick = tick()
+            _lastAutoAssistTick = tick()
         end
     end
 end
--- ===================== AUTO OPEN DOORS =====================
-local _lastDoorScanTick = 0
-local function openAllDoors()
-    if not autoDoorsEnabled then return end
-    if tick() - _lastDoorScanTick < 2.0 then return end
-    _lastDoorScanTick = tick()
-    local character = LocalPlayer.Character
-    if not character then return end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    local playerPos = hrp.Position
-    pcall(function()
-        local taggedDoors = CollectionService:GetTagged("Door2")
-        for _, door in ipairs(taggedDoors) do
-            if door:IsA("Model") and door.PrimaryPart then
-                local dist = (door.PrimaryPart.Position - playerPos).Magnitude
-                if dist <= 60 then
-                    if door:GetAttribute("DoorOpen") ~= true then
-                        door:SetAttribute("DoorOpen", true)
+-- ===================== ACTUAL AUTO ROB =====================
+local _noclipConn
+local function toggleNoclip(state)
+    if state then
+        if not _noclipConn then
+            _noclipConn = RunService.Stepped:Connect(function()
+                local char = LocalPlayer.Character
+                if char then
+                    for _, v in pairs(char:GetDescendants()) do
+                        if v:IsA("BasePart") and v.CanCollide then
+                            v.CanCollide = false
+                        end
                     end
                 end
-            end
+            end)
         end
-    end)
-    local DoorUtils = getDoorUtils()
-    if DoorUtils then
-        pcall(function()
-            local taggedDoors = CollectionService:GetTagged("Door2")
-            for _, door in ipairs(taggedDoors) do
-                if door:IsA("Model") and door.PrimaryPart then
-                    local dist = (door.PrimaryPart.Position - playerPos).Magnitude
-                    if dist <= 60 then
-                        pcall(function()
-                            if DoorUtils.getOpen and not DoorUtils.getOpen(door) then
-                                DoorUtils.setOpen(door, true)
-                            end
-                        end)
-                    end
-                end
-            end
-        end)
+    else
+        if _noclipConn then
+            _noclipConn:Disconnect()
+            _noclipConn = nil
+        end
     end
-    pcall(function()
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("Model") and (obj.Name == "SlideDoor" or string.find(obj.Name, "SlideDoor")) then
-                if obj.PrimaryPart then
-                    local dist = (obj.PrimaryPart.Position - playerPos).Magnitude
-                    if dist <= 60 then
-                        obj:SetAttribute("DoorOpen", true)
+end
+-- ===================== DOOR BYPASS =====================
+local function onDescendantAdded(descendant)
+    if descendant:IsA("Model") then
+        local nameLower = string.lower(descendant.Name)
+        if string.find(nameLower, "door") or string.find(nameLower, "gate") then
+            table.insert(cachedWorkspaceDoors, descendant)
+        end
+    end
+end
+local function onDescendantRemoving(descendant)
+    local idx = table.find(cachedWorkspaceDoors, descendant)
+    if idx then
+        table.remove(cachedWorkspaceDoors, idx)
+    end
+end
+-- Initialize workspace door cache
+pcall(function()
+    for _, desc in ipairs(workspace:GetDescendants()) do
+        onDescendantAdded(desc)
+    end
+end)
+addConnection(workspace.DescendantAdded:Connect(onDescendantAdded))
+addConnection(workspace.DescendantRemoving:Connect(onDescendantRemoving))
+local function toggleDoorBypass(state)
+    bypassDoorsEnabled = state
+    if state then
+        if not _doorBypassConn then
+            _doorBypassConn = RunService.Stepped:Connect(function()
+                if not bypassDoorsEnabled then return end
+                local char = LocalPlayer.Character
+                if not char then return end
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+                local playerPos = hrp.Position
+                
+                -- Process Door2 Tagged Doors
+                pcall(function()
+                    local DoorUtils = getDoorUtils()
+                    local taggedDoors = CollectionService:GetTagged("Door2")
+                    for _, door in ipairs(taggedDoors) do
+                        if door:IsA("Model") and door.PrimaryPart then
+                            local dist = (door.PrimaryPart.Position - playerPos).Magnitude
+                            if dist <= 50 then
+                                -- Visually open the door
+                                if door:GetAttribute("DoorOpen") ~= true then
+                                    door:SetAttribute("DoorOpen", true)
+                                end
+                                if door:GetAttribute("DoorPctOpen") ~= 1 then
+                                    door:SetAttribute("DoorPctOpen", 1)
+                                end
+                                if DoorUtils and DoorUtils.setOpen then
+                                    pcall(function()
+                                        if DoorUtils.getOpen and not DoorUtils.getOpen(door) then
+                                            DoorUtils.setOpen(door, true)
+                                        end
+                                    end)
+                                end
+                                
+                                -- Disable collisions locally
+                                for _, part in ipairs(door:GetDescendants()) do
+                                    if part:IsA("BasePart") and part.CanCollide then
+                                        part.CanCollide = false
+                                    end
+                                end
+                            end
+                        end
                     end
-                end
-            end
+                end)
+                
+                -- Process Cached Workspace Doors (Name contains door/gate)
+                pcall(function()
+                    for _, door in ipairs(cachedWorkspaceDoors) do
+                        if door.Parent and door:IsA("Model") then
+                            local pivotPart = door.PrimaryPart or door:FindFirstChildOfClass("BasePart")
+                            if pivotPart then
+                                local dist = (pivotPart.Position - playerPos).Magnitude
+                                if dist <= 50 then
+                                    -- Visually open the door
+                                    if door:GetAttribute("DoorOpen") ~= true then
+                                        door:SetAttribute("DoorOpen", true)
+                                    end
+                                    
+                                    -- Disable collisions locally
+                                    for _, part in ipairs(door:GetDescendants()) do
+                                        if part:IsA("BasePart") and part.CanCollide then
+                                            part.CanCollide = false
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end)
+            end)
+            addConnection(_doorBypassConn)
+        end
+    else
+        if _doorBypassConn then
+            _doorBypassConn:Disconnect()
+            _doorBypassConn = nil
+        end
+    end
+end
+local function tweenToPos(targetPos, speed)
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = char.HumanoidRootPart
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    
+    local startPos = hrp.Position
+    local horizontalDist = (Vector3.new(targetPos.X, 0, targetPos.Z) - Vector3.new(startPos.X, 0, startPos.Z)).Magnitude
+    
+    -- Parameters
+    local groundStepSize = 3
+    local groundStepDelay = 0.06 -- ~50 studs/sec
+    
+    local skyStepSize = 9
+    local skyStepDelay = 0.06 -- ~150 studs/sec
+    
+    -- Helper to check if under ceiling
+    local function underCeiling(pos)
+        local raycastParams = RaycastParams.new()
+        raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+        raycastParams.FilterDescendantsInstances = {char}
+        local result = workspace:Raycast(pos, Vector3.new(0, 150, 0), raycastParams)
+        return result ~= nil
+    end
+    if horizontalDist <= 150 then
+        -- Short distance: Tween directly on ground/noclip
+        local steps = math.ceil(horizontalDist / groundStepSize)
+        for i = 1, steps do
+            if not actualAutoRobEnabled then break end
+            pcall(function()
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.RotVelocity = Vector3.new(0, 0, 0)
+            end)
+            local currentTarget = startPos:Lerp(targetPos, i / steps)
+            hrp.CFrame = CFrame.new(currentTarget)
+            if humanoid then pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Physics) end) end
+            task.wait(groundStepDelay)
+        end
+    else
+        -- Long distance: Sky travel
+        -- 1. Exit building horizontally first if under a ceiling
+        local currentPos = startPos
+        local exitSteps = 0
+        local maxExitSteps = 100 -- Prevent infinite loops
+        
+        while underCeiling(currentPos) and exitSteps < maxExitSteps do
+            if not actualAutoRobEnabled then break end
+            exitSteps = exitSteps + 1
+            
+            -- Move horizontally towards target X, Z
+            local remainingHoriz = Vector3.new(targetPos.X - currentPos.X, 0, targetPos.Z - currentPos.Z)
+            local dir = remainingHoriz.Unit
+            local dist = remainingHoriz.Magnitude
+            
+            local moveDist = math.min(groundStepSize, dist)
+            if dist < 0.1 then break end
+            
+            currentPos = currentPos + dir * moveDist
+            pcall(function()
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.RotVelocity = Vector3.new(0, 0, 0)
+            end)
+            hrp.CFrame = CFrame.new(currentPos)
+            if humanoid then pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Physics) end) end
+            task.wait(groundStepDelay)
+        end
+        
+        if not actualAutoRobEnabled then return end
+        
+        -- 2. Now we are in open sky (or reached target/max steps). Rise vertically.
+        local safeY = math.max(currentPos.Y + 130, targetPos.Y + 130)
+        safeY = math.clamp(safeY, -50, 380)
+        
+        local upPos = Vector3.new(currentPos.X, safeY, currentPos.Z)
+        local distUp = (upPos - currentPos).Magnitude
+        local stepsUp = math.ceil(distUp / skyStepSize)
+        
+        for i = 1, stepsUp do
+            if not actualAutoRobEnabled then break end
+            pcall(function()
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.RotVelocity = Vector3.new(0, 0, 0)
+            end)
+            hrp.CFrame = CFrame.new(currentPos:Lerp(upPos, i / stepsUp))
+            if humanoid then pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Physics) end) end
+            task.wait(skyStepDelay)
+        end
+        
+        if not actualAutoRobEnabled then return end
+        
+        -- 3. Move horizontally in the sky
+        local skyStart = upPos
+        local skyEnd = Vector3.new(targetPos.X, safeY, targetPos.Z)
+        local distHoriz = (skyEnd - skyStart).Magnitude
+        local stepsHoriz = math.ceil(distHoriz / skyStepSize)
+        
+        for i = 1, stepsHoriz do
+            if not actualAutoRobEnabled then break end
+            pcall(function()
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.RotVelocity = Vector3.new(0, 0, 0)
+            end)
+            hrp.CFrame = CFrame.new(skyStart:Lerp(skyEnd, i / stepsHoriz))
+            if humanoid then pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Physics) end) end
+            task.wait(skyStepDelay)
+        end
+        
+        if not actualAutoRobEnabled then return end
+        
+        -- 4. Descend vertically down onto target
+        local downStart = skyEnd
+        local downEnd = targetPos
+        local distDown = (downEnd - downStart).Magnitude
+        local stepsDown = math.ceil(distDown / skyStepSize)
+        
+        for i = 1, stepsDown do
+            if not actualAutoRobEnabled then break end
+            pcall(function()
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.RotVelocity = Vector3.new(0, 0, 0)
+            end)
+            hrp.CFrame = CFrame.new(downStart:Lerp(downEnd, i / stepsDown))
+            if humanoid then pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Physics) end) end
+            task.wait(skyStepDelay)
+        end
+    end
+    
+    -- Final stabilization and reset state
+    pcall(function()
+        hrp.Velocity = Vector3.new(0, 0, 0)
+        hrp.RotVelocity = Vector3.new(0, 0, 0)
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Running)
         end
     end)
-    pcall(function()
-        local taggedDoors = CollectionService:GetTagged("Door2")
-        for _, door in ipairs(taggedDoors) do
-            if door:IsA("Model") and door.PrimaryPart then
-                local dist = (door.PrimaryPart.Position - playerPos).Magnitude
-                if dist <= 60 then
-                    local currentPct = door:GetAttribute("DoorPctOpen")
-                    if currentPct == nil or currentPct < 1 then
-                        door:SetAttribute("DoorPctOpen", 1)
+end
+local function getDuffelBagInfo()
+    local DuffelBagUtilsObj = ReplicatedStorage:FindFirstChild("Game", true) and ReplicatedStorage.Game:FindFirstChild("DuffelBag") and ReplicatedStorage.Game.DuffelBag:FindFirstChild("DuffelBagUtils")
+    if DuffelBagUtilsObj then
+        local success, DuffelBagUtils = pcall(require, DuffelBagUtilsObj)
+        if success and DuffelBagUtils.getBag then
+            local bagObj = DuffelBagUtils.getBag(LocalPlayer)
+            if bagObj and bagObj._obj then
+                local amount = bagObj._obj:FindFirstChild("Amount") and bagObj._obj.Amount.Value or 0
+                local max = bagObj._obj:FindFirstChild("Maximum") and bagObj._obj.Maximum.Value or 0
+                local robberyEnum = bagObj._obj:FindFirstChild("DuffelBagRobberyEnum") and bagObj._obj.DuffelBagRobberyEnum.Value or nil
+                return amount, max, robberyEnum
+            end
+        end
+    end
+    return 0, 0, nil
+end
+local function isLootPrompt(specName, partName)
+    if not specName then return false end
+    local nameLower = string.lower(specName)
+    local partLower = partName and string.lower(partName) or ""
+    
+    -- Explicitly exclude generic or non-robbery prompts
+    if string.find(nameLower, "sit") or string.find(nameLower, "enter") or 
+       string.find(nameLower, "passenger") or string.find(nameLower, "driver") or 
+       string.find(nameLower, "spawn") or string.find(nameLower, "drawer") or 
+       string.find(nameLower, "elevator") or string.find(nameLower, "door") or
+       string.find(nameLower, "hatch") or string.find(nameLower, "rope") or
+       string.find(nameLower, "lever") or string.find(nameLower, "switch") or
+       string.find(nameLower, "talk") or string.find(nameLower, "lantern") or
+       string.find(nameLower, "atm") or string.find(partLower, "atm") then
+        return false
+    end
+    
+    local lootKeywords = {
+        "jewel", "bone", "mask", "egg", "arm", "picture", "relic", "mummy",
+        "gold", "treasure", "briefcase", "cash", "money", "crate", "grab", "steal",
+        "register", "cashier", "vault"
+    }
+    
+    for _, kw in ipairs(lootKeywords) do
+        if string.find(nameLower, kw) or string.find(partLower, kw) then
+            return true
+        end
+    end
+    return false
+end
+local _autoRobTask = nil
+local function doActualAutoRob()
+    if not actualAutoRobEnabled then 
+        if _autoRobTask then
+            task.cancel(_autoRobTask)
+            _autoRobTask = nil
+            toggleNoclip(false)
+        end
+        return 
+    end
+    if _autoRobTask then return end
+    _autoRobTask = task.spawn(function()
+        while actualAutoRobEnabled do
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local amount, max, robberyEnum = getDuffelBagInfo()
+                local isFull = (amount >= max) and (max > 0)
+                
+                if isFull then
+                    -- Noclip and tween to Volcano Collector
+                    toggleNoclip(true)
+                    tweenToPos(Vector3.new(1008, -84, -179), 80)
+                    task.wait(1.5) -- Wait for sell
+                else
+                    -- Check if we are in Bank robbery (robbery enum = 1)
+                    if robberyEnum == 1 then
+                        local bank = workspace:FindFirstChild("Banks", true) and workspace.Banks:FindFirstChild("Bank")
+                        local moneyPart = bank and bank:FindFirstChild("Layout") and bank.Layout:FindFirstChild("Money", true)
+                        if moneyPart and moneyPart:IsA("BasePart") then
+                            toggleNoclip(true)
+                            tweenToPos(moneyPart.Position + Vector3.new(0, 2, 0), 80)
+                        end
+                        task.wait(1)
+                    else
+                        local UIModule = getUIModule()
+                        if UIModule and UIModule.CircleAction and UIModule.CircleAction.Specs then
+                            local bestTarget = nil
+                            local bestDist = math.huge
+                            
+                            for _, spec in pairs(UIModule.CircleAction.Specs) do
+                                if spec.Part and spec.Name and spec.Enabled ~= false then
+                                    if isLootPrompt(spec.Name, spec.Part.Name) then
+                                        local dist = (char.HumanoidRootPart.Position - spec.Part.Position).Magnitude
+                                        if dist < bestDist then
+                                            bestDist = dist
+                                            bestTarget = spec
+                                        end
+                                    end
+                                end
+                            end
+                            
+                            if bestTarget then
+                                toggleNoclip(true)
+                                -- Tween to just above the robbery target
+                                tweenToPos(bestTarget.Part.Position + Vector3.new(0, 3, 0), 80)
+                                task.wait(0.5)
+                                
+                                if UIModule.CircleAction.Press then
+                                    UIModule.CircleAction.Press()
+                                end
+                                task.wait(1)
+                            else
+                                toggleNoclip(false)
+                            end
+                        end
                     end
                 end
             end
+            task.wait(1)
         end
+        _autoRobTask = nil
+        toggleNoclip(false)
     end)
 end
 -- ===================== INIT =====================
@@ -1117,8 +1433,8 @@ end)
 task.spawn(function()
     while loopActive do
         pcall(doAutoArrest)
-        pcall(doAutoRob)
-        pcall(openAllDoors)
+        pcall(doAutoAssistRobbery)
+        pcall(doActualAutoRob)
         task.wait(0.3)
     end
 end)
@@ -1831,14 +2147,17 @@ end)
 createAdjusterRow(autoContainer, "ArrestRange", "Arrest Range", 52, 15, 5, 50, 1, "%d studs", function(val)
     autoArrestRange = val
 end)
-createToggleRow(autoContainer, "AutoRob", "Auto Rob Interactions", 94, false, function(state)
-    autoRobEnabled = state
+createToggleRow(autoContainer, "AutoAssistRobbery", "Auto Assist Robbery", 94, false, function(state)
+    autoAssistRobberyEnabled = state
 end)
-createAdjusterRow(autoContainer, "RobRange", "Rob Range", 136, 20, 5, 100, 1, "%d studs", function(val)
-    autoRobRange = val
+createToggleRow(autoContainer, "ActualAutoRob", "Actual Auto Rob (Movement)", 136, false, function(state)
+    actualAutoRobEnabled = state
 end)
-createToggleRow(autoContainer, "AutoDoors", "Auto Open Doors", 178, false, function(state)
-    autoDoorsEnabled = state
+createAdjusterRow(autoContainer, "AssistRange", "Assist Range", 178, 20, 5, 100, 1, "%d studs", function(val)
+    autoAssistRange = val
+end)
+createToggleRow(autoContainer, "DoorBypass", "Open Any Door / Bypass", 220, false, function(state)
+    toggleDoorBypass(state)
 end)
 -- Spawn Tab
 createSpawnRow(spawnContainer, "SpawnCamaro", "Camaro (Free)", 10, "Camaro", "Chassis")

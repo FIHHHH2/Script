@@ -33,6 +33,20 @@ local oldGui = CoreGui:FindFirstChild(GUI_NAME)
 if oldGui then oldGui:Destroy() end
 local oldESP = CoreGui:FindFirstChild(ESP_FOLDER_NAME)
 if oldESP then oldESP:Destroy() end
+-- Mobile/Instant Arrest Spoofing
+local instantArrestEnabled = false
+pcall(function()
+    local UIS = game:GetService("UserInputService")
+    local oldIndex
+    oldIndex = hookmetamethod(game, "__index", function(self, key)
+        if not checkcaller() and self == UIS and key == "TouchEnabled" then
+            if instantArrestEnabled then
+                return true
+            end
+        end
+        return oldIndex(self, key)
+    end)
+end)
 -- ===================== STATE =====================
 local espEnabled = true
 local infiniteJumpEnabled = false
@@ -48,6 +62,17 @@ local boatDriveOnLand = false
 local infiniteBoostEnabled = false
 local carFlightEnabled = false
 local carFlightSpeed = 100
+-- Plane Properties
+local heliSpeedMult = 1.0
+local heliForwardMult = 1.0
+local heliUpMult = 1.0
+local jetSpeedMult = 1.0
+local _activePlaneConst = nil -- Reference to the active plane's CONST table
+local _activePlaneOrigThrust = nil -- Original MAX_THRUST value
+-- Motorcycle Properties
+local bikeSpeedMult = 1.0
+local voltSpeedMult = 1.0
+local bikeTurnSpeedMult = 1.0
 local audioVolumeMultiplier = 1.0
 local soundOrigVolumes = setmetatable({}, { __mode = "k" })
 -- Aimbot
@@ -346,13 +371,34 @@ local function updateVehicle()
                 packet._origSuspension = packet.Suspension or 4
                 packet._origTurnSpeed = packet.TurnSpeed or 1.4
             end
-            if carSpeedMult > 1.0 then
-                packet.EngineSpeedMult = carSpeedMult
+            
+            -- Detect vehicle type from packet (reliable for all vehicles)
+            local isMotorcycle = (packet.Type == "Motorcycle")
+            
+            if isMotorcycle then
+                -- Motorcycle settings
+                if bikeSpeedMult > 1.0 then
+                    packet.EngineSpeedMult = bikeSpeedMult
+                else
+                    packet.EngineSpeedMult = nil
+                end
+                packet.TurnSpeed = packet._origTurnSpeed * bikeTurnSpeedMult
             else
-                packet.EngineSpeedMult = nil
+                -- Car settings
+                if carSpeedMult > 1.0 then
+                    packet.EngineSpeedMult = carSpeedMult
+                else
+                    packet.EngineSpeedMult = nil
+                end
+                packet.TurnSpeed = packet._origTurnSpeed * carTurnSpeedMult
             end
+            
+            -- Apply plane thrust multiplier to active plane CONST (per-frame)
+            if _activePlaneConst and _activePlaneOrigThrust then
+                _activePlaneConst.MAX_THRUST = _activePlaneOrigThrust * jetSpeedMult
+            end
+            
             packet.Height = packet._origHeight + carHeightOffset
-            packet.TurnSpeed = packet._origTurnSpeed * carTurnSpeedMult
             -- Keep local packet custom state fields locked to bypass depletion
             if infiniteBoostEnabled then
                 packet.Nitro = true
@@ -367,10 +413,10 @@ local function updateVehicle()
         end
     end)
 end
--- Hook boat/jetski systems
+-- Hook boat/jetski/heli/plane/volt systems
 local function hookVehicles()
+    -- 1. Hook Boat class
     pcall(function()
-        -- 1. Hook Boat class
         local BoatModObj = ReplicatedStorage:FindFirstChild("Game", true)
         local BoatMod = BoatModObj and BoatModObj:FindFirstChild("Boat") and BoatModObj.Boat:FindFirstChild("Boat")
         if BoatMod then
@@ -416,8 +462,8 @@ local function hookVehicles()
             end
         end
     end)
+    -- 2. Hook JetSki class
     pcall(function()
-        -- 2. Hook JetSki class
         local JetSkiObj = ReplicatedStorage:FindFirstChild("Game", true)
         local JetSkiMod = JetSkiObj and JetSkiObj:FindFirstChild("VehicleSystem") and JetSkiObj.VehicleSystem:FindFirstChild("JetSki")
         if JetSkiMod then
@@ -457,6 +503,89 @@ local function hookVehicles()
                     obj.VectorForce = proxyForce
                 end
                 return obj
+            end
+        end
+    end)
+    -- 3. Hook Heli class (Helicopters, Drones, UFOs, etc.)
+    pcall(function()
+        local HeliMod = ReplicatedStorage:FindFirstChild("Game", true):FindFirstChild("Vehicle"):FindFirstChild("Heli")
+        if HeliMod then
+            local Heli = require(HeliMod)
+            local origHeliUpdate = Heli.Update
+            Heli.Update = function(self, p31)
+                self.SpeedMult = heliSpeedMult
+                self.ForwardMult = heliForwardMult
+                self.UpMult = heliUpMult
+                return origHeliUpdate(self, p31)
+            end
+        end
+    end)
+    -- 4. Hook Plane class (Jet, Stunt) — capture CONST for per-frame thrust modification
+    pcall(function()
+        local PlaneMod = ReplicatedStorage:FindFirstChild("Game", true):FindFirstChild("Plane"):FindFirstChild("BaseUserControlledPlane")
+        if PlaneMod then
+            local Plane = require(PlaneMod)
+            local origPlaneNew = Plane.new
+            Plane.new = function(...)
+                local self = origPlaneNew(...)
+                if self and self.CONST then
+                    -- Store reference so updateVehicle can modify thrust per-frame
+                    _activePlaneConst = self.CONST
+                    _activePlaneOrigThrust = self.CONST.MAX_THRUST or 700
+                end
+                return self
+            end
+        end
+    end)
+    -- 4b. Also hook Jet module to capture its plane CONST (Jet wraps BaseUserControlledPlane)
+    pcall(function()
+        local JetMod = ReplicatedStorage:FindFirstChild("Game", true):FindFirstChild("Plane"):FindFirstChild("Jet")
+        if JetMod then
+            local Jet = require(JetMod)
+            local origJetNew = Jet.new
+            Jet.new = function(...)
+                local self = origJetNew(...)
+                if self and self.Plane and self.Plane.CONST then
+                    _activePlaneConst = self.Plane.CONST
+                    _activePlaneOrigThrust = self.Plane.CONST.MAX_THRUST or 1400
+                end
+                return self
+            end
+        end
+    end)
+    -- 4c. Hook Stunt plane module (wraps BaseUserControlledPlane like Jet)
+    pcall(function()
+        local StuntMod = ReplicatedStorage:FindFirstChild("Game", true):FindFirstChild("Plane")
+        StuntMod = StuntMod and StuntMod:FindFirstChild("Stunt")
+        if StuntMod then
+            local Stunt = require(StuntMod)
+            local origStuntNew = Stunt.new
+            Stunt.new = function(...)
+                local self = origStuntNew(...)
+                if self and self.Plane and self.Plane.CONST then
+                    _activePlaneConst = self.Plane.CONST
+                    _activePlaneOrigThrust = self.Plane.CONST.MAX_THRUST or 790
+                end
+                return self
+            end
+        end
+    end)
+    -- 5. Hook Volt bike class
+    pcall(function()
+        local VoltMod = ReplicatedStorage:FindFirstChild("Game", true):FindFirstChild("Vehicle"):FindFirstChild("Volt")
+        if VoltMod then
+            local Volt = require(VoltMod)
+            local origVoltUpdate = Volt.Update
+            Volt.Update = function(self)
+                origVoltUpdate(self)
+                if voltSpeedMult > 1.0 then
+                    local engine = self.Model and self.Model:FindFirstChild("Engine")
+                    local throttle = self.Throttle or 0
+                    if engine and self.Force and math.abs(throttle) > 0.05 then
+                        local extraForce = engine.CFrame.LookVector * throttle * engine.AssemblyMass * 145 * (voltSpeedMult - 1.0)
+                        self.Force.Force = self.Force.Force + extraForce
+                    end
+                end
             end
         end
     end)
@@ -1041,6 +1170,19 @@ addConnection(heartbeatConn)
 local renderConn = RunService.RenderStepped:Connect(function()
     if loopActive then
         updateAimbot()
+        if instantArrestEnabled then
+            pcall(function()
+                local UIModule = getUIModule()
+                if UIModule and UIModule.CircleAction and UIModule.CircleAction.Specs then
+                    for _, spec in pairs(UIModule.CircleAction.Specs) do
+                        if spec.Name == "Arrest" then
+                            spec.Duration = 0
+                            spec.Timed = false
+                        end
+                    end
+                end
+            end)
+        end
     end
 end)
 addConnection(renderConn)
@@ -1110,7 +1252,7 @@ local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
 mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 mainFrame.Position = UDim2.new(0.5, 0, 0.4, 0)
-mainFrame.Size = UDim2.new(0, 380, 0, 340)
+mainFrame.Size = UDim2.new(0, 480, 0, 340)
 mainFrame.BackgroundColor3 = Color3.fromRGB(18, 19, 26)
 mainFrame.BorderSizePixel = 0
 mainFrame.ClipsDescendants = true
@@ -1152,7 +1294,7 @@ tabLine.Position = UDim2.new(0, 0, 1, 0)
 tabLine.BackgroundColor3 = Color3.fromRGB(30, 31, 41)
 tabLine.BorderSizePixel = 0
 tabLine.Parent = tabBar
-local tabNames = {"PLAYER", "VEHICLE", "AIMBOT", "WEAPONS", "AUTO"}
+local tabNames = {"PLAYER", "VEHICLE", "PLANE", "MOTORCYCLE", "AIMBOT", "WEAPONS", "AUTO", "SPAWN"}
 local tabButtons = {}
 local tabContainers = {}
 local numTabs = #tabNames
@@ -1178,7 +1320,7 @@ for i, tabName in ipairs(tabNames) do
     btn.Font = Enum.Font.GothamBold
     btn.Text = tabName
     btn.TextColor3 = i == 1 and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(130, 133, 155)
-    btn.TextSize = 10
+    btn.TextSize = 7.5
     btn.Parent = tabBar
     tabButtons[i] = btn
     local container = Instance.new("ScrollingFrame")
@@ -1207,9 +1349,12 @@ for i, tabName in ipairs(tabNames) do
 end
 local playerContainer = tabContainers[1]
 local vehicleContainer = tabContainers[2]
-local aimbotContainer = tabContainers[3]
-local weaponsContainer = tabContainers[4]
-local autoContainer = tabContainers[5]
+local planeContainer = tabContainers[3]
+local motorcycleContainer = tabContainers[4]
+local aimbotContainer = tabContainers[5]
+local weaponsContainer = tabContainers[6]
+local autoContainer = tabContainers[7]
+local spawnContainer = tabContainers[8]
 -- ===================== UI HELPERS =====================
 local function createToggleRow(parent, name, labelText, yOffset, defaultState, callback)
     local container = Instance.new("Frame")
@@ -1456,6 +1601,53 @@ local function createInfoLabel(parent, text, yOffset)
     label.TextWrapped = true
     label.Parent = parent
 end
+local function createSpawnRow(parent, name, labelText, yOffset, make, vType)
+    local container = Instance.new("Frame")
+    container.Name = name .. "Container"
+    container.Size = UDim2.new(0.9, 0, 0, 36)
+    container.Position = UDim2.new(0.05, 0, 0, yOffset)
+    container.BackgroundTransparency = 1
+    container.Parent = parent
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.6, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(200, 202, 218)
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = container
+    
+    local btn = Instance.new("TextButton")
+    btn.Name = "SpawnBtn"
+    btn.Size = UDim2.new(0, 80, 0, 24)
+    btn.Position = UDim2.new(1, -80, 0.5, -12)
+    btn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.Text = "SPAWN"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 11
+    btn.Parent = container
+    
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(0, 6)
+    bc.Parent = btn
+    
+    local bs = Instance.new("UIStroke")
+    bs.Color = Color3.fromRGB(0, 120, 220)
+    bs.Thickness = 1
+    bs.Parent = btn
+    
+    btn.MouseButton1Click:Connect(function()
+        pcall(function()
+            local rep = game:GetService("ReplicatedStorage")
+            rep.GarageSetInPhysical:FireServer(true)
+            task.wait(0.1)
+            rep.GarageSpawnVehicle:FireServer(vType, make)
+        end)
+    end)
+end
 -- ===================== POPULATE TABS =====================
 -- Player Tab
 createToggleRow(playerContainer, "BountyESP", "Master ESP", 10, true, function(state)
@@ -1471,7 +1663,10 @@ end)
 createToggleRow(playerContainer, "NoSlow", "No Damage Slow", 136, false, function(state)
     noSlowEnabled = state
 end)
-createAdjusterRow(playerContainer, "GameVolume", "Game Volume", 178, 1.0, 0.0, 2.0, 0.1, "%.1fx", function(val)
+createToggleRow(playerContainer, "InstantArrest", "Instant Arrest (Mobile Tap)", 178, false, function(state)
+    instantArrestEnabled = state
+end)
+createAdjusterRow(playerContainer, "GameVolume", "Game Volume", 220, 1.0, 0.0, 2.0, 0.1, "%.1fx", function(val)
     audioVolumeMultiplier = val
     updateAllSoundsVolume()
 end)
@@ -1499,6 +1694,29 @@ createAdjusterRow(vehicleContainer, "FlightSpeed", "Flight Speed", 262, 100, 10,
 end)
 createToggleRow(vehicleContainer, "InfiniteBoost", "Infinite Boost / Nitro", 304, false, function(state)
     infiniteBoostEnabled = state
+end)
+-- Plane Tab
+createAdjusterRow(planeContainer, "HeliSpeed", "Heli Speed Mult", 10, 1.0, 1.0, 10.0, 0.5, "%.1fx", function(val)
+    heliSpeedMult = val
+end)
+createAdjusterRow(planeContainer, "HeliForward", "Heli Forward Mult", 52, 1.0, 1.0, 5.0, 0.5, "%.1fx", function(val)
+    heliForwardMult = val
+end)
+createAdjusterRow(planeContainer, "HeliLift", "Heli Lift Mult", 94, 1.0, 1.0, 5.0, 0.5, "%.1fx", function(val)
+    heliUpMult = val
+end)
+createAdjusterRow(planeContainer, "JetSpeed", "Jet Thrust Mult", 136, 1.0, 1.0, 10.0, 0.5, "%.1fx", function(val)
+    jetSpeedMult = val
+end)
+-- Motorcycle Tab
+createAdjusterRow(motorcycleContainer, "BikeSpeed", "Bike Speed Mult", 10, 1.0, 1.0, 10.0, 0.5, "%.1fx", function(val)
+    bikeSpeedMult = val
+end)
+createAdjusterRow(motorcycleContainer, "VoltSpeed", "Volt Speed Mult", 52, 1.0, 1.0, 10.0, 0.5, "%.1fx", function(val)
+    voltSpeedMult = val
+end)
+createAdjusterRow(motorcycleContainer, "BikeTurn", "Bike Steering Mult", 94, 1.0, 1.0, 5.0, 0.2, "%.1fx", function(val)
+    bikeTurnSpeedMult = val
 end)
 -- Aimbot Tab
 createToggleRow(aimbotContainer, "AimbotToggle", "Enable Aimbot", 10, false, function(state)
@@ -1569,6 +1787,19 @@ end)
 createToggleRow(autoContainer, "AutoDoors", "Auto Open Doors", 178, false, function(state)
     autoDoorsEnabled = state
 end)
+-- Spawn Tab
+createSpawnRow(spawnContainer, "SpawnCamaro", "Camaro (Free)", 10, "Camaro", "Chassis")
+createSpawnRow(spawnContainer, "SpawnModel3", "Model 3 ($16k)", 52, "Model3", "Chassis")
+createSpawnRow(spawnContainer, "SpawnRoadster", "Tesla Roadster ($600k)", 94, "Roadster", "Chassis")
+createSpawnRow(spawnContainer, "SpawnVolt", "Volt Bike ($1M)", 136, "Volt", "Custom")
+createSpawnRow(spawnContainer, "SpawnPatrol", "Patrol Motorcycle ($45k)", 178, "Patrol", "Motorcycle")
+createSpawnRow(spawnContainer, "SpawnChiron", "Eclaire / Chiron ($500k)", 220, "Chiron", "Chassis")
+createSpawnRow(spawnContainer, "SpawnConcept", "Concept Car ($2.5M)", 262, "Concept", "Chassis")
+createSpawnRow(spawnContainer, "SpawnHeli", "Helicopter (Free)", 304, "Heli", "Heli")
+createSpawnRow(spawnContainer, "SpawnLittleBird", "Little Bird ($190k)", 346, "LittleBird", "Heli")
+createSpawnRow(spawnContainer, "SpawnBlackHawk", "Army Heli / BlackHawk ($1M)", 388, "BlackHawk", "Heli")
+createSpawnRow(spawnContainer, "SpawnDrone", "Drone ($1M)", 430, "Drone", "Heli")
+createSpawnRow(spawnContainer, "SpawnJet", "Military Jet ($1M)", 472, "Jet", "Chassis3")
 -- Footnote
 local footer = Instance.new("TextLabel")
 footer.Size = UDim2.new(1, 0, 0, 20)

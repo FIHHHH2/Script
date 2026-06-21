@@ -30,6 +30,10 @@ local oldGui = CoreGui:FindFirstChild(GUI_NAME)
 if oldGui then oldGui:Destroy() end
 local oldESP = CoreGui:FindFirstChild(ESP_FOLDER)
 if oldESP then oldESP:Destroy() end
+local oldItemESP = CoreGui:FindFirstChild("MassacreItemESP")
+if oldItemESP then oldItemESP:Destroy() end
+local oldBreakerESP = CoreGui:FindFirstChild("MassacreBreakerESP")
+if oldBreakerESP then oldBreakerESP:Destroy() end
 -- ===================== STATE =====================
 local espEnabled = true
 local espIgnoreRegulars = false
@@ -37,6 +41,12 @@ local espShowDistance = true
 local espShowHealth = true
 local espFillTransparency = 0.3
 local espOutlineTransparency = 0.1
+local itemEspEnabled = true
+local itemEspFillTransparency = 0.4
+local itemEspOutlineTransparency = 0.2
+local breakerEspEnabled = true
+local breakerEspFillTransparency = 0.4
+local breakerEspOutlineTransparency = 0.2
 local aimbotEnabled = false
 local aimbotFOV = 150
 local aimbotSmoothing = 5
@@ -212,6 +222,12 @@ end
 local espFolder = Instance.new("Folder")
 espFolder.Name = ESP_FOLDER
 espFolder.Parent = CoreGui
+local itemEspFolder = Instance.new("Folder")
+itemEspFolder.Name = "MassacreItemESP"
+itemEspFolder.Parent = CoreGui
+local breakerEspFolder = Instance.new("Folder")
+breakerEspFolder.Name = "MassacreBreakerESP"
+breakerEspFolder.Parent = CoreGui
 local function setupCharacterESP(player, char)
     if player == LocalPlayer then return end
     
@@ -274,7 +290,165 @@ end
 local function clearAllESP()
     espFolder:ClearAllChildren()
 end
-local function updateESP()
+local function updateItemESP()
+    if not itemEspEnabled then
+        itemEspFolder:ClearAllChildren()
+        return
+    end
+    local localChar = LocalPlayer.Character
+    local localHrp = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    local currentItems = {}
+    local map = workspace:FindFirstChild("Map")
+    if map then
+        map = map:FindFirstChild("Map")
+        if map then
+            local itemsFolder = map:FindFirstChild("Items")
+            if itemsFolder then
+                for _, item in ipairs(itemsFolder:GetChildren()) do
+                    local prompt = item:FindFirstChildOfClass("ProximityPrompt")
+                    if prompt and prompt.Enabled then
+                        currentItems[item] = true
+                    end
+                end
+            end
+        end
+    end
+    for _, child in ipairs(itemEspFolder:GetChildren()) do
+        local adornee = child:IsA("Highlight") and child.Adornee or (child:IsA("BillboardGui") and child.Adornee and child.Adornee.Parent)
+        if adornee and not currentItems[adornee] then
+            child:Destroy()
+        end
+    end
+    for item in pairs(currentItems) do
+        local targetPart = item:IsA("Model") and (item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")) or item
+        if targetPart then
+            local hlName = item:GetDebugId() .. "_HL"
+            local hl = itemEspFolder:FindFirstChild(hlName)
+            if not hl then
+                hl = Instance.new("Highlight")
+                hl.Name = hlName
+                hl.FillColor = Color3.fromRGB(0, 255, 100)
+                hl.OutlineColor = Color3.fromRGB(150, 255, 180)
+                hl.Parent = itemEspFolder
+            end
+            hl.Adornee = item
+            hl.Enabled = true
+            hl.FillTransparency = itemEspFillTransparency
+            hl.OutlineTransparency = itemEspOutlineTransparency
+            local bbName = item:GetDebugId() .. "_BB"
+            local bb = itemEspFolder:FindFirstChild(bbName)
+            if not bb then
+                bb = Instance.new("BillboardGui")
+                bb.Name = bbName
+                bb.AlwaysOnTop = true
+                bb.Size = UDim2.new(0, 150, 0, 30)
+                bb.StudsOffset = Vector3.new(0, 2, 0)
+                bb.Parent = itemEspFolder
+                local label = Instance.new("TextLabel")
+                label.Name = "Label"
+                label.BackgroundTransparency = 1
+                label.Size = UDim2.new(1, 0, 1, 0)
+                label.Font = Enum.Font.GothamBold
+                label.TextSize = 12
+                label.TextStrokeTransparency = 0
+                label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                label.TextColor3 = Color3.fromRGB(0, 255, 100)
+                label.Parent = label.Parent or bb
+            end
+            bb.Adornee = targetPart
+            bb.Enabled = true
+            local label = bb:FindFirstChild("Label")
+            if label then
+                local distStr = ""
+                if localHrp then
+                    local dist = math.floor((localHrp.Position - targetPart.Position).Magnitude)
+                    distStr = string.format(" [%d studs]", dist)
+                end
+                label.Text = item.Name .. distStr
+            end
+        end
+    end
+end
+local function updateBreakerESP()
+    if not breakerEspEnabled then
+        breakerEspFolder:ClearAllChildren()
+        return
+    end
+    local localChar = LocalPlayer.Character
+    local localHrp = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    local currentBreakers = {}
+    local map = workspace:FindFirstChild("Map")
+    if map then
+        map = map:FindFirstChild("Map")
+        if map then
+            local interactables = map:FindFirstChild("Interactables")
+            if interactables then
+                for _, child in ipairs(interactables:GetChildren()) do
+                    local prompt = child:FindFirstChildOfClass("ProximityPrompt")
+                    if prompt and (prompt.ActionText == "Disable lights" or prompt.ObjectText == "Breaker" or prompt.ActionText:lower():find("light")) then
+                        currentBreakers[child] = true
+                    end
+                end
+            end
+        end
+    end
+    for _, child in ipairs(breakerEspFolder:GetChildren()) do
+        local adornee = child:IsA("Highlight") and child.Adornee or (child:IsA("BillboardGui") and child.Adornee and child.Adornee.Parent)
+        if adornee and not currentBreakers[adornee] then
+            child:Destroy()
+        end
+    end
+    for breaker in pairs(currentBreakers) do
+        local targetPart = breaker:IsA("Model") and (breaker.PrimaryPart or breaker:FindFirstChildWhichIsA("BasePart")) or breaker
+        if targetPart then
+            local hlName = breaker:GetDebugId() .. "_HL"
+            local hl = breakerEspFolder:FindFirstChild(hlName)
+            if not hl then
+                hl = Instance.new("Highlight")
+                hl.Name = hlName
+                hl.FillColor = Color3.fromRGB(255, 150, 0)
+                hl.OutlineColor = Color3.fromRGB(255, 200, 100)
+                hl.Parent = breakerEspFolder
+            end
+            hl.Adornee = breaker
+            hl.Enabled = true
+            hl.FillTransparency = breakerEspFillTransparency
+            hl.OutlineTransparency = breakerEspOutlineTransparency
+            local bbName = breaker:GetDebugId() .. "_BB"
+            local bb = breakerEspFolder:FindFirstChild(bbName)
+            if not bb then
+                bb = Instance.new("BillboardGui")
+                bb.Name = bbName
+                bb.AlwaysOnTop = true
+                bb.Size = UDim2.new(0, 180, 0, 30)
+                bb.StudsOffset = Vector3.new(0, 3, 0)
+                bb.Parent = breakerEspFolder
+                local label = Instance.new("TextLabel")
+                label.Name = "Label"
+                label.BackgroundTransparency = 1
+                label.Size = UDim2.new(1, 0, 1, 0)
+                label.Font = Enum.Font.GothamBold
+                label.TextSize = 12
+                label.TextStrokeTransparency = 0
+                label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                label.TextColor3 = Color3.fromRGB(255, 150, 0)
+                label.Parent = label.Parent or bb
+            end
+            bb.Adornee = targetPart
+            bb.Enabled = true
+            local label = bb:FindFirstChild("Label")
+            if label then
+                local distStr = ""
+                if localHrp then
+                    local dist = math.floor((localHrp.Position - targetPart.Position).Magnitude)
+                    distStr = string.format(" [%d studs]", dist)
+                end
+                label.Text = "⚡ Electrical Box" .. distStr
+            end
+        end
+    end
+end
+local function updatePlayerESP()
     if not espEnabled then
         clearAllESP()
         return
@@ -369,6 +543,11 @@ local function updateESP()
             end
         end
     end
+end
+local function updateESP()
+    updatePlayerESP()
+    updateItemESP()
+    updateBreakerESP()
 end
 -- ===================== AIMBOT =====================
 local function isAlive(player)
@@ -771,6 +950,10 @@ table.insert(_G.MassacreHack_Connections, {
             fovCircle:Remove()
         end
         clearAllESP()
+        pcall(function() itemEspFolder:ClearAllChildren() end)
+        pcall(function() breakerEspFolder:ClearAllChildren() end)
+        pcall(function() itemEspFolder:Destroy() end)
+        pcall(function() breakerEspFolder:Destroy() end)
         restoreWeaponConfigs()
         -- Restore original Knife tools
         pcall(function()
@@ -1447,6 +1630,30 @@ end)
 createSliderRow(espContainer, "OutlineTransparency", "Outline Transparency", 230, 0.1, 0.0, 1.0, 0.05, "%.2f", function(val)
     espOutlineTransparency = val
     updateESP()
+end)
+createToggleRow(espContainer, "ItemESPToggle", "Item ESP", 274, true, function(state)
+    itemEspEnabled = state
+    updateItemESP()
+end)
+createSliderRow(espContainer, "ItemFillTransparency", "Item Fill Transparency", 318, 0.4, 0.0, 1.0, 0.05, "%.2f", function(val)
+    itemEspFillTransparency = val
+    updateItemESP()
+end)
+createSliderRow(espContainer, "ItemOutlineTransparency", "Item Outline Transparency", 362, 0.2, 0.0, 1.0, 0.05, "%.2f", function(val)
+    itemEspOutlineTransparency = val
+    updateItemESP()
+end)
+createToggleRow(espContainer, "BreakerESPToggle", "Electrical Box ESP", 406, true, function(state)
+    breakerEspEnabled = state
+    updateBreakerESP()
+end)
+createSliderRow(espContainer, "BreakerFillTransparency", "Breaker Fill Transparency", 450, 0.4, 0.0, 1.0, 0.05, "%.2f", function(val)
+    breakerEspFillTransparency = val
+    updateBreakerESP()
+end)
+createSliderRow(espContainer, "BreakerOutlineTransparency", "Breaker Outline Transparency", 494, 0.2, 0.0, 1.0, 0.05, "%.2f", function(val)
+    breakerEspOutlineTransparency = val
+    updateBreakerESP()
 end)
 -- ===================== POPULATE: AIMBOT TAB =====================
 createToggleRow(aimbotContainer, "AimbotToggle", "Enable Aimbot", 10, false, function(state)

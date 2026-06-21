@@ -1264,6 +1264,54 @@ local borderStroke = Instance.new("UIStroke")
 borderStroke.Color = Color3.fromRGB(45, 47, 62)
 borderStroke.Thickness = 1
 borderStroke.Parent = mainFrame
+-- Resize handle
+local resizeHandle = Instance.new("Frame")
+resizeHandle.Name = "ResizeHandle"
+resizeHandle.AnchorPoint = Vector2.new(1, 1)
+resizeHandle.Position = UDim2.new(1, 0, 1, 0)
+resizeHandle.Size = UDim2.new(0, 16, 0, 16)
+resizeHandle.BackgroundTransparency = 1
+resizeHandle.ZIndex = 10
+resizeHandle.Parent = mainFrame
+local resizeIcon = Instance.new("TextLabel")
+resizeIcon.Size = UDim2.new(1, 0, 1, 0)
+resizeIcon.BackgroundTransparency = 1
+resizeIcon.Text = "\226\151\162"
+resizeIcon.TextColor3 = Color3.fromRGB(60, 62, 80)
+resizeIcon.TextSize = 14
+resizeIcon.Font = Enum.Font.GothamBold
+resizeIcon.ZIndex = 10
+resizeIcon.Parent = resizeHandle
+local MIN_WIDTH = 380
+local MIN_HEIGHT = 260
+local isResizing = false
+local resizeStartPos = nil
+local resizeStartSize = nil
+resizeHandle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isResizing = true
+        resizeStartPos = input.Position
+        resizeStartSize = mainFrame.AbsoluteSize
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                isResizing = false
+            end
+        end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if isResizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - resizeStartPos
+        local newWidth = math.max(MIN_WIDTH, resizeStartSize.X + delta.X)
+        local newHeight = math.max(MIN_HEIGHT, resizeStartSize.Y + delta.Y)
+        mainFrame.Size = UDim2.new(0, newWidth, 0, newHeight)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isResizing = false
+    end
+end)
 local titleBar = Instance.new("TextLabel")
 titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1, 0, 0, 36)
@@ -1294,7 +1342,7 @@ tabLine.Position = UDim2.new(0, 0, 1, 0)
 tabLine.BackgroundColor3 = Color3.fromRGB(30, 31, 41)
 tabLine.BorderSizePixel = 0
 tabLine.Parent = tabBar
-local tabNames = {"PLAYER", "VEHICLE", "PLANE", "MOTORCYCLE", "AIMBOT", "WEAPONS", "AUTO", "SPAWN"}
+local tabNames = {"PLAYER", "VEHICLE", "AIMBOT", "WEAPONS", "AUTO", "SPAWN"}
 local tabButtons = {}
 local tabContainers = {}
 local numTabs = #tabNames
@@ -1307,7 +1355,7 @@ activeIndicator.BorderSizePixel = 0
 activeIndicator.Parent = tabBar
 local contentFrame = Instance.new("Frame")
 contentFrame.Name = "ContentFrame"
-contentFrame.Size = UDim2.new(1, 0, 1, -64)
+contentFrame.Size = UDim2.new(1, 0, 1, -84)
 contentFrame.Position = UDim2.new(0, 0, 0, 64)
 contentFrame.BackgroundTransparency = 1
 contentFrame.Parent = mainFrame
@@ -1349,12 +1397,10 @@ for i, tabName in ipairs(tabNames) do
 end
 local playerContainer = tabContainers[1]
 local vehicleContainer = tabContainers[2]
-local planeContainer = tabContainers[3]
-local motorcycleContainer = tabContainers[4]
-local aimbotContainer = tabContainers[5]
-local weaponsContainer = tabContainers[6]
-local autoContainer = tabContainers[7]
-local spawnContainer = tabContainers[8]
+local aimbotContainer = tabContainers[3]
+local weaponsContainer = tabContainers[4]
+local autoContainer = tabContainers[5]
+local spawnContainer = tabContainers[6]
 -- ===================== UI HELPERS =====================
 local function createToggleRow(parent, name, labelText, yOffset, defaultState, callback)
     local container = Instance.new("Frame")
@@ -1695,29 +1741,6 @@ end)
 createToggleRow(vehicleContainer, "InfiniteBoost", "Infinite Boost / Nitro", 304, false, function(state)
     infiniteBoostEnabled = state
 end)
--- Plane Tab
-createAdjusterRow(planeContainer, "HeliSpeed", "Heli Speed Mult", 10, 1.0, 1.0, 10.0, 0.5, "%.1fx", function(val)
-    heliSpeedMult = val
-end)
-createAdjusterRow(planeContainer, "HeliForward", "Heli Forward Mult", 52, 1.0, 1.0, 5.0, 0.5, "%.1fx", function(val)
-    heliForwardMult = val
-end)
-createAdjusterRow(planeContainer, "HeliLift", "Heli Lift Mult", 94, 1.0, 1.0, 5.0, 0.5, "%.1fx", function(val)
-    heliUpMult = val
-end)
-createAdjusterRow(planeContainer, "JetSpeed", "Jet Thrust Mult", 136, 1.0, 1.0, 10.0, 0.5, "%.1fx", function(val)
-    jetSpeedMult = val
-end)
--- Motorcycle Tab
-createAdjusterRow(motorcycleContainer, "BikeSpeed", "Bike Speed Mult", 10, 1.0, 1.0, 10.0, 0.5, "%.1fx", function(val)
-    bikeSpeedMult = val
-end)
-createAdjusterRow(motorcycleContainer, "VoltSpeed", "Volt Speed Mult", 52, 1.0, 1.0, 10.0, 0.5, "%.1fx", function(val)
-    voltSpeedMult = val
-end)
-createAdjusterRow(motorcycleContainer, "BikeTurn", "Bike Steering Mult", 94, 1.0, 1.0, 5.0, 0.2, "%.1fx", function(val)
-    bikeTurnSpeedMult = val
-end)
 -- Aimbot Tab
 createToggleRow(aimbotContainer, "AimbotToggle", "Enable Aimbot", 10, false, function(state)
     aimbotEnabled = state
@@ -1791,15 +1814,12 @@ end)
 createSpawnRow(spawnContainer, "SpawnCamaro", "Camaro (Free)", 10, "Camaro", "Chassis")
 createSpawnRow(spawnContainer, "SpawnModel3", "Model 3 ($16k)", 52, "Model3", "Chassis")
 createSpawnRow(spawnContainer, "SpawnRoadster", "Tesla Roadster ($600k)", 94, "Roadster", "Chassis")
-createSpawnRow(spawnContainer, "SpawnVolt", "Volt Bike ($1M)", 136, "Volt", "Custom")
-createSpawnRow(spawnContainer, "SpawnPatrol", "Patrol Motorcycle ($45k)", 178, "Patrol", "Motorcycle")
-createSpawnRow(spawnContainer, "SpawnChiron", "Eclaire / Chiron ($500k)", 220, "Chiron", "Chassis")
-createSpawnRow(spawnContainer, "SpawnConcept", "Concept Car ($2.5M)", 262, "Concept", "Chassis")
-createSpawnRow(spawnContainer, "SpawnHeli", "Helicopter (Free)", 304, "Heli", "Heli")
-createSpawnRow(spawnContainer, "SpawnLittleBird", "Little Bird ($190k)", 346, "LittleBird", "Heli")
-createSpawnRow(spawnContainer, "SpawnBlackHawk", "Army Heli / BlackHawk ($1M)", 388, "BlackHawk", "Heli")
-createSpawnRow(spawnContainer, "SpawnDrone", "Drone ($1M)", 430, "Drone", "Heli")
-createSpawnRow(spawnContainer, "SpawnJet", "Military Jet ($1M)", 472, "Jet", "Chassis3")
+createSpawnRow(spawnContainer, "SpawnChiron", "Eclaire / Chiron ($500k)", 136, "Chiron", "Chassis")
+createSpawnRow(spawnContainer, "SpawnConcept", "Concept Car ($2.5M)", 178, "Concept", "Chassis")
+createSpawnRow(spawnContainer, "SpawnHeli", "Helicopter (Free)", 220, "Heli", "Heli")
+createSpawnRow(spawnContainer, "SpawnLittleBird", "Little Bird ($190k)", 262, "LittleBird", "Heli")
+createSpawnRow(spawnContainer, "SpawnBlackHawk", "Army Heli / BlackHawk ($1M)", 304, "BlackHawk", "Heli")
+createSpawnRow(spawnContainer, "SpawnDrone", "Drone ($1M)", 346, "Drone", "Heli")
 -- Footnote
 local footer = Instance.new("TextLabel")
 footer.Size = UDim2.new(1, 0, 0, 20)

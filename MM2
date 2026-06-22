@@ -20,10 +20,14 @@ local wsEnabled=false local wsVal=16
 local jpEnabled=false local jpVal=50
 local ncEnabled=false local bhEnabled=false local fovEnabled=false local fovVal=90
 local acCoins=false local acEquip=false
+local autoKillMurderer=false
+local autoGrabGun=false
+local knifeAlert=false
 local bgT=0.9 local curLay=1 local custBg=nil
 local playerData={} local currentRole="Innocent"
 local Remotes=RS:FindFirstChild("Remotes")
 local GPR=Remotes and Remotes:FindFirstChild("Gameplay")
+local detectedRoles = {}
 local function fetchPD()
 	local gd=GPR and GPR:FindFirstChild("GetCurrentPlayerData")
 	if gd then
@@ -37,22 +41,41 @@ if pdc then ac(pdc.OnClientEvent:Connect(function(d) playerData=d or {}
 		if d and d[LP.Name] then currentRole=d[LP.Name].Role or "Innocent" end end)) end
 fetchPD()
 spawn(function() while wait(5) do fetchPD() end end)
--- Fast role detection (checks tools as fallback)
-local function getRoleFast(p)
+local roundStart = GPR and GPR:FindFirstChild("RoundStart")
+if roundStart then
+	ac(roundStart.OnClientEvent:Connect(function()
+		detectedRoles = {}
+	end))
+end
+-- Fast role detection (checks tools as fallback with cache)
+local function getRole(p)
 	local pdRole=playerData and playerData[p.Name] and playerData[p.Name].Role
 	if pdRole and pdRole~="Innocent" then return pdRole end
-	local c=p.Character; local bp=p.Backpack
+	if detectedRoles[p.Name] then return detectedRoles[p.Name] end
+
+	local c=p.Character; local bp=p:FindFirstChild("Backpack")
 	if c then
-		if c:FindFirstChild("Knife") then return "Murderer" end
-		if c:FindFirstChild("Gun") then return "Sheriff" end
+		if c:FindFirstChild("Knife") or c:FindFirstChild("RealKnife") then 
+			detectedRoles[p.Name] = "Murderer"
+			return "Murderer" 
+		end
+		if c:FindFirstChild("Gun") or c:FindFirstChild("RealGun") then 
+			detectedRoles[p.Name] = "Sheriff"
+			return "Sheriff" 
+		end
 	end
 	if bp then
-		if bp:FindFirstChild("Knife") then return "Murderer" end
-		if bp:FindFirstChild("Gun") then return "Sheriff" end
+		if bp:FindFirstChild("Knife") or bp:FindFirstChild("RealKnife") then 
+			detectedRoles[p.Name] = "Murderer"
+			return "Murderer" 
+		end
+		if bp:FindFirstChild("Gun") or bp:FindFirstChild("RealGun") then 
+			detectedRoles[p.Name] = "Sheriff"
+			return "Sheriff" 
+		end
 	end
 	return pdRole or "Innocent"
 end
-local function getRole(p) return getRoleFast(p) end
 local function getDead(p) return (playerData and playerData[p.Name] and playerData[p.Name].Dead) or false end
 local function getChar(p)
 	if p and p.Character then
@@ -64,6 +87,58 @@ local function getAlive()
 	local l={}
 	for _,p in Players:GetPlayers() do if p~=LP and getChar(p) then table.insert(l,p) end end
 	return l
+end
+local function getMurderer()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LP and getRole(p) == "Murderer" and not getDead(p) then
+			return p
+		end
+	end
+	return nil
+end
+local function killAll()
+	local char = LP.Character
+	local kn = char and char:FindFirstChild("Knife") or (LP.Backpack and LP.Backpack:FindFirstChild("Knife"))
+	if not kn then return end
+	if char and not char:FindFirstChild("Knife") then
+		char:FindFirstChildOfClass("Humanoid"):EquipTool(kn)
+	end
+	local handle = kn:FindFirstChild("Handle")
+	if handle then
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= LP then
+				local root = getRoot(p)
+				if root and not getDead(p) then
+					firetouchinterest(handle, root, 0)
+					firetouchinterest(handle, root, 1)
+				end
+			end
+		end
+	end
+end
+local function instantKillMurderer()
+	local mud = getMurderer()
+	local char = LP.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local gun = char and char:FindFirstChild("Gun") or (LP.Backpack and LP.Backpack:FindFirstChild("Gun"))
+
+	if mud and root and hum and gun then
+		local mRoot = getRoot(mud)
+		if mRoot then
+			local oldCF = root.CFrame
+			root.CFrame = mRoot.CFrame * CFrame.new(0, 0, 4)
+			task.wait(0.1)
+			if not char:FindFirstChild("Gun") then
+				hum:EquipTool(gun)
+			end
+			task.wait(0.1)
+			CAM.CFrame = CFrame.new(CAM.CFrame.Position, mRoot.Position)
+			gun:Activate()
+			task.wait(0.15)
+			root.CFrame = oldCF
+		end
+	end
 end
 -- FOV circle
 local fovGui=Instance.new("ScreenGui"); fovGui.Name="MM2FOV"; fovGui.Parent=CG; fovGui.ResetOnSpawn=false
@@ -205,9 +280,9 @@ closeBtn.MouseEnter:Connect(function() closeBtn.BackgroundColor3=Color3.fromRGB(
 closeBtn.MouseLeave:Connect(function() closeBtn.BackgroundColor3=Color3.fromRGB(40,40,40); closeBtn.BackgroundTransparency=0.5 end)
 -- Left sidebar with tabs
 local sideBg=52
-local tabNames={"AIMBOT","MURDERER","ESP","PLAYER","WORLD","UI"}
-local tabIcons={"\u{1F3AF}","\u{1F5E1}","\u{1F441}","\u{1F3C3}","\u{1F30D}","\u{2699}"}
-local tabLabels={"Aimbot","Murderer","ESP","Movement","World","UI"}
+local tabNames={"AIMBOT","MURDERER","SHERIFF","ESP","PLAYER","WORLD","UI"}
+local tabIcons={"\u{1F3AF}","\u{1F5E1}","\u{1F6E1}","\u{1F441}","\u{1F3C3}","\u{1F30D}","\u{2699}"}
+local tabLabels={"Aimbot","Murderer","Sheriff","ESP","Movement","World","UI"}
 local tabBtns={}
 local tabConts={}
 local activeTab=1
@@ -379,6 +454,7 @@ addTog(tabConts[1],"Aimbot Enabled",aimEnabled,function(s) aimEnabled=s end)
 addSlider(tabConts[1],"FOV",10,360,aimFOV,function(v) aimFOV=v; updateFOVCircle() end,"")
 addTog(tabConts[1],"Show FOV Circle",aimShowFOV,function(s) aimShowFOV=s; updateFOVCircle() end)
 addTog(tabConts[1],"Team Check",true,function(s) end)
+addTog(tabConts[1],"Auto-Kill Murderer",autoKillMurderer,function(s) autoKillMurderer=s end)
 addSec(tabConts[1],"Silent Aim")
 addTog(tabConts[1],"Silent Aim",silAim,function(s) silAim=s end)
 addSlider(tabConts[1],"Silent FOV",10,360,silFOV,function(v) silFOV=v end,"")
@@ -388,6 +464,7 @@ addTog(tabConts[2],"Auto-Stab",autoStab,function(s) autoStab=s end)
 addSlider(tabConts[2],"Stab Reach",10,60,stabReach,function(v) stabReach=v end,"")
 addTog(tabConts[2],"Knife Aimbot",knifeAim,function(s) knifeAim=s end)
 addTog(tabConts[2],"Highlight Victims",highlVics,function(s) highlVics=s end)
+addBtn(tabConts[2],"Kill All Players",killAll)
 addSec(tabConts[2],"Auto-Equip")
 addTog(tabConts[2],"Auto-Equip Knife",true,function(s) acEquip=s end)
 addSec(tabConts[2],"Info")
@@ -401,48 +478,86 @@ local function updateMurderInfo()
 	murderInfo.TextColor3=isM and Color3.fromRGB(255,50,50) or Color3.fromRGB(200,200,200)
 end
 spawn(function() while wait(1) do updateMurderInfo() end end)
--- TAB 3: ESP
-addSec(tabConts[3],"Player ESP")
-addTog(tabConts[3],"ESP Enabled",espEnabled,function(s) espEnabled=s end)
-addTog(tabConts[3],"Show Role",espShowRole,function(s) espShowRole=s end)
-addTog(tabConts[3],"Show Distance",espShowDist,function(s) espShowDist=s end)
-addBtn(tabConts[3],"Refresh Player Data",fetchPD)
-addSec(tabConts[3],"World ESP")
-addTog(tabConts[3],"Weapon ESP",wepEsp,function(s) wepEsp=s end)
-addTog(tabConts[3],"Coin ESP",coinEsp,function(s) coinEsp=s end)
--- TAB 4: PLAYER
-addSec(tabConts[4],"Movement")
-addTog(tabConts[4],"WalkSpeed",wsEnabled,function(s) wsEnabled=s end)
-addSlider(tabConts[4],"Speed",16,120,wsVal,function(v) wsVal=v end,"")
-addTog(tabConts[4],"Jump Power",jpEnabled,function(s) jpEnabled=s end)
-addSlider(tabConts[4],"Jump",50,200,jpVal,function(v) jpVal=v end,"")
-addTog(tabConts[4],"No Clip",ncEnabled,function(s) ncEnabled=s end)
-addTog(tabConts[4],"Bunny Hop",bhEnabled,function(s) bhEnabled=s end)
-addSec(tabConts[4],"Camera")
-addTog(tabConts[4],"FOV Changer",fovEnabled,function(s) fovEnabled=s end)
-addSlider(tabConts[4],"FOV Value",30,120,fovVal,function(v) fovVal=v end,"")
-addSec(tabConts[4],"Teleport")
-for _,p in Players:GetPlayers() do
-	if p~=LP then addBtn(tabConts[4],"TP to "..p.Name,function()
-			local r=getRoot(p); local mr=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-			if r and mr then mr.CFrame=r.CFrame+Vector3.new(0,3,0) end
-		end) end
+-- TAB 3: SHERIFF
+addSec(tabConts[3],"Combat")
+addTog(tabConts[3],"Auto-Kill Murderer",autoKillMurderer,function(s) autoKillMurderer=s end)
+addBtn(tabConts[3],"Instant Kill Murderer",instantKillMurderer)
+addSec(tabConts[3],"Dropped Gun")
+addTog(tabConts[3],"Auto-Grab Gun",autoGrabGun,function(s) autoGrabGun=s end)
+addSec(tabConts[3],"Alerts")
+addTog(tabConts[3],"Murderer Knife Alert",knifeAlert,function(s) knifeAlert=s end)
+-- TAB 4: ESP
+addSec(tabConts[4],"Player ESP")
+addTog(tabConts[4],"ESP Enabled",espEnabled,function(s) espEnabled=s end)
+addTog(tabConts[4],"Show Role",espShowRole,function(s) espShowRole=s end)
+addTog(tabConts[4],"Show Distance",espShowDist,function(s) espShowDist=s end)
+addBtn(tabConts[4],"Refresh Player Data",fetchPD)
+addSec(tabConts[4],"World ESP")
+addTog(tabConts[4],"Weapon ESP",wepEsp,function(s) wepEsp=s end)
+addTog(tabConts[4],"Coin ESP",coinEsp,function(s) coinEsp=s end)
+-- TAB 5: PLAYER
+addSec(tabConts[5],"Movement")
+addTog(tabConts[5],"WalkSpeed",wsEnabled,function(s) wsEnabled=s end)
+addSlider(tabConts[5],"Speed",16,120,wsVal,function(v) wsVal=v end,"")
+addTog(tabConts[5],"Jump Power",jpEnabled,function(s) jpEnabled=s end)
+addSlider(tabConts[5],"Jump",50,200,jpVal,function(v) jpVal=v end,"")
+addTog(tabConts[5],"No Clip",ncEnabled,function(s) ncEnabled=s end)
+addTog(tabConts[5],"Bunny Hop",bhEnabled,function(s) bhEnabled=s end)
+addSec(tabConts[5],"Camera")
+addTog(tabConts[5],"FOV Changer",fovEnabled,function(s) fovEnabled=s end)
+addSlider(tabConts[5],"FOV Value",30,120,fovVal,function(v) fovVal=v end,"")
+addSec(tabConts[5],"Teleport")
+local tpContainer = Instance.new("Frame")
+tpContainer.Size = UDim2.new(1, 0, 0, 0)
+tpContainer.BackgroundTransparency = 1
+tpContainer.Parent = tabConts[5]
+local tpLayout = Instance.new("UIListLayout")
+tpLayout.Padding = UDim.new(0, 3)
+tpLayout.SortOrder = Enum.SortOrder.LayoutOrder
+tpLayout.Parent = tpContainer
+local function updateTPList()
+	for _, child in ipairs(tpContainer:GetChildren()) do
+		if not child:IsA("UIListLayout") then child:Destroy() end
+	end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LP then
+			local b = Instance.new("TextButton")
+			b.Size = UDim2.new(1, -10, 0, 30)
+			b.BackgroundColor3 = L.accent
+			b.TextColor3 = Color3.fromRGB(255, 255, 255)
+			b.Text = "TP to " .. p.Name
+			b.Font = Enum.Font.ArimoBold
+			b.TextSize = 13
+			b.BorderSizePixel = 0
+			b.Parent = tpContainer
+			Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+
+			b.MouseButton1Click:Connect(function()
+				local r = getRoot(p)
+				local mr = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+				if r and mr then
+					mr.CFrame = r.CFrame * CFrame.new(0, 3, -2)
+				end
+			end)
+		end
+	end
+	task.defer(function()
+		tpContainer.Size = UDim2.new(1, 0, 0, tpLayout.AbsoluteContentSize.Y)
+		tabConts[5].CanvasSize = UDim2.new(0, 0, 0, tabConts[5].UIListLayout.AbsoluteContentSize.Y + 20)
+	end)
 end
-Players.PlayerAdded:Connect(function(p)
-	if p~=LP then addBtn(tabConts[4],"TP to "..p.Name,function()
-			local r=getRoot(p); local mr=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-			if r and mr then mr.CFrame=r.CFrame+Vector3.new(0,3,0) end
-		end) end
-end)
--- TAB 5: WORLD
-addSec(tabConts[5],"Auto")
-addTog(tabConts[5],"Auto Collect Coins",acCoins,function(s) acCoins=s end)
-addTog(tabConts[5],"Auto Equip Weapon",acEquip,function(s) acEquip=s end)
-addSec(tabConts[5],"Player Info")
+ac(Players.PlayerAdded:Connect(updateTPList))
+ac(Players.PlayerRemoving:Connect(updateTPList))
+updateTPList()
+-- TAB 6: WORLD
+addSec(tabConts[6],"Auto")
+addTog(tabConts[6],"Auto Collect Coins",acCoins,function(s) acCoins=s end)
+addTog(tabConts[6],"Auto Equip Weapon",acEquip,function(s) acEquip=s end)
+addSec(tabConts[6],"Player Info")
 local infoL=Instance.new("TextLabel")
 infoL.Size=UDim2.new(1,-10,0,40); infoL.BackgroundTransparency=0.7; infoL.BackgroundColor3=Color3.new(0,0,0)
 infoL.TextColor3=L.text; infoL.Text="Role: "..currentRole; infoL.Font=Enum.Font.ArimoBold
-infoL.TextSize=12; infoL.TextXAlignment=Enum.TextXAlignment.Left; infoL.Parent=tabConts[5]
+infoL.TextSize=12; infoL.TextXAlignment=Enum.TextXAlignment.Left; infoL.Parent=tabConts[6]
 spawn(function() while wait(1) do infoL.Text="Your Role: "..currentRole.." | Players: "..#Players:GetPlayers() end end)
 -- Layout system
 local layouts={
@@ -515,15 +630,15 @@ local custBGs={
 	{"Navy",Color3.fromRGB(10,15,35)},{"Dark Red",Color3.fromRGB(30,5,5)},{"Dark Green",Color3.fromRGB(5,20,5)},
 	{"Dark Purple",Color3.fromRGB(20,5,30)},{"Dark Brown",Color3.fromRGB(30,20,10)},
 }
--- TAB 6: UI
-addSec(tabConts[6],"Window")
-addBtn(tabConts[6],"Reset Position",function()
+-- TAB 7: UI
+addSec(tabConts[7],"Window")
+addBtn(tabConts[7],"Reset Position",function()
 	main.Position=UDim2.new(0.5,-240,0.5,-280)
 end)
-addTog(tabConts[6],"Toggle GUI (])",true,function(s) gui.Enabled=s end)
-addSec(tabConts[6],"Layout Themes")
+addTog(tabConts[7],"Toggle GUI (])",true,function(s) gui.Enabled=s end)
+addSec(tabConts[7],"Layout Themes")
 local function makeLayRow()
-	local r=Instance.new("Frame"); r.Size=UDim2.new(1,-10,0,28); r.BackgroundTransparency=1; r.Parent=tabConts[6]
+	local r=Instance.new("Frame"); r.Size=UDim2.new(1,-10,0,28); r.BackgroundTransparency=1; r.Parent=tabConts[7]
 	local lay=Instance.new("UIListLayout"); lay.FillDirection=Enum.FillDirection.Horizontal; lay.Padding=UDim.new(0,6); lay.SortOrder=Enum.SortOrder.LayoutOrder; lay.Parent=r
 	return r
 end
@@ -544,8 +659,8 @@ for ri=1,math.ceil(#layouts/4) do
 	end
 end
 applyLayout(1)
-addSec(tabConts[6],"Custom BG Color")
-local bgRow=Instance.new("Frame"); bgRow.Size=UDim2.new(1,-10,0,26); bgRow.BackgroundTransparency=1; bgRow.Parent=tabConts[6]
+addSec(tabConts[7],"Custom BG Color")
+local bgRow=Instance.new("Frame"); bgRow.Size=UDim2.new(1,-10,0,26); bgRow.BackgroundTransparency=1; bgRow.Parent=tabConts[7]
 local bgLay=Instance.new("UIListLayout"); bgLay.FillDirection=Enum.FillDirection.Horizontal; bgLay.Padding=UDim.new(0,4); bgLay.Wraps=true; bgLay.SortOrder=Enum.SortOrder.LayoutOrder; bgLay.Parent=bgRow
 for _,c in ipairs(custBGs) do
 	local b=Instance.new("TextButton")
@@ -560,8 +675,8 @@ rndBg.TextColor3=Color3.fromRGB(150,150,150); rndBg.Text="RND"; rndBg.Font=Enum.
 rndBg.MouseButton1Click:Connect(function()
 	local l=layouts[curLayIdx]; l.bg=Color3.fromRGB(math.random(0,255),math.random(0,255),math.random(0,255)); applyLayout(curLayIdx)
 end)
-addSec(tabConts[6],"Accent Color")
-local accRow=Instance.new("Frame"); accRow.Size=UDim2.new(1,-10,0,26); accRow.BackgroundTransparency=1; accRow.Parent=tabConts[6]
+addSec(tabConts[7],"Accent Color")
+local accRow=Instance.new("Frame"); accRow.Size=UDim2.new(1,-10,0,26); accRow.BackgroundTransparency=1; accRow.Parent=tabConts[7]
 local accLay=Instance.new("UIListLayout"); accLay.FillDirection=Enum.FillDirection.Horizontal; accLay.Padding=UDim.new(0,4); accLay.Wraps=true; accLay.SortOrder=Enum.SortOrder.LayoutOrder; accLay.Parent=accRow
 local accColors={
 	{"Gray",Color3.fromRGB(80,80,80)},{"Cyan",Color3.fromRGB(0,200,255)},{"Green",Color3.fromRGB(0,200,0)},
@@ -582,24 +697,24 @@ rndAcc.TextColor3=Color3.fromRGB(150,150,150); rndAcc.Text="RND"; rndAcc.Font=En
 rndAcc.MouseButton1Click:Connect(function()
 	local l=layouts[curLayIdx]; l.accent=Color3.fromRGB(math.random(0,255),math.random(0,255),math.random(0,255)); applyLayout(curLayIdx)
 end)
-addSec(tabConts[6],"Border Style")
-addBtn(tabConts[6],"Thin Border",function() main.BorderSizePixel=1 end)
-addBtn(tabConts[6],"Default Border",function() main.BorderSizePixel=2 end)
-addBtn(tabConts[6],"Thick Border",function() main.BorderSizePixel=4 end)
-addBtn(tabConts[6],"No Border",function() main.BorderSizePixel=0 end)
-addSec(tabConts[6],"Window Size")
-addBtn(tabConts[6],"Reset Size (520x560)",function() main.Size=UDim2.new(0,520,0,560) end)
+addSec(tabConts[7],"Border Style")
+addBtn(tabConts[7],"Thin Border",function() main.BorderSizePixel=1 end)
+addBtn(tabConts[7],"Default Border",function() main.BorderSizePixel=2 end)
+addBtn(tabConts[7],"Thick Border",function() main.BorderSizePixel=4 end)
+addBtn(tabConts[7],"No Border",function() main.BorderSizePixel=0 end)
+addSec(tabConts[7],"Window Size")
+addBtn(tabConts[7],"Reset Size (520x560)",function() main.Size=UDim2.new(0,520,0,560) end)
 local sizeL=Instance.new("TextLabel")
 sizeL.Size=UDim2.new(1,-10,0,20); sizeL.BackgroundTransparency=1; sizeL.TextColor3=Color3.fromRGB(140,140,140)
-sizeL.Text="Drag corner to resize"; sizeL.Font=Enum.Font.ArimoBold; sizeL.TextSize=11; sizeL.Parent=tabConts[6]
-addSec(tabConts[6],"Title Style")
-addBtn(tabConts[6],"Default",function() title.Text="MM2 HACK" end)
-addBtn(tabConts[6],"Full Name",function() title.Text="MURDER MYSTERY 2" end)
-addBtn(tabConts[6],"Minimal",function() title.Text="MM2" end)
-addBtn(tabConts[6],"Fancy",function() title.Text="> mm2_hack" end)
-addSec(tabConts[6],"Transparency")
+sizeL.Text="Drag corner to resize"; sizeL.Font=Enum.Font.ArimoBold; sizeL.TextSize=11; sizeL.Parent=tabConts[7]
+addSec(tabConts[7],"Title Style")
+addBtn(tabConts[7],"Default",function() title.Text="MM2 HACK" end)
+addBtn(tabConts[7],"Full Name",function() title.Text="MURDER MYSTERY 2" end)
+addBtn(tabConts[7],"Minimal",function() title.Text="MM2" end)
+addBtn(tabConts[7],"Fancy",function() title.Text="> mm2_hack" end)
+addSec(tabConts[7],"Transparency")
 local origTransparencies={}
-addSlider(tabConts[6],"BG Alpha",0,100,90,function(v)
+addSlider(tabConts[7],"BG Alpha",0,100,90,function(v)
 	bgT=v/100; local dfl=0.9
 	local skip={main,title,foot,side}; for _,c in ipairs(tabConts) do table.insert(skip,c) end
 	for _,o in main:GetDescendants() do
@@ -617,8 +732,8 @@ addSlider(tabConts[6],"BG Alpha",0,100,90,function(v)
 		end
 	end
 end,"%")
-addSec(tabConts[6],"Settings")
-addBtn(tabConts[6],"Reset All Layouts",function()
+addSec(tabConts[7],"Settings")
+addBtn(tabConts[7],"Reset All Layouts",function()
 	local defs={
 		{name="Default",bg=Color3.fromRGB(10,10,10),accent=Color3.fromRGB(80,160,255),text=Color3.fromRGB(220,220,220),border=Color3.fromRGB(60,60,60)},
 		{name="Cyberpunk",bg=Color3.fromRGB(5,8,25),accent=Color3.fromRGB(0,180,255),text=Color3.fromRGB(200,255,240),border=Color3.fromRGB(0,80,140)},
@@ -704,23 +819,63 @@ ac(RSv.RenderStepped:Connect(function()
 				end
 			end
 		end
-	end
-	updateFOVCircle()
-end))
--- Auto Collect
-spawn(function()
-	while wait(0.5) do
-		if acCoins then
-			local mp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-			if mp then
-				local gc=GPR and GPR:FindFirstChild("GetCoin")
-				if gc then
-					for _,v in workspace:GetDescendants() do
-						if v:IsA("Part") and v.Name=="Coin" and v:FindFirstChild("TouchInterest") and (mp.Position-v.Position).Magnitude<100 then
-							gc:FireServer(v)
+		-- Sheriff Auto-Kill Murderer
+		if autoKillMurderer and (currentRole == "Sheriff" or currentRole == "Hero" or c:FindFirstChild("Gun") or (LP.Backpack and LP.Backpack:FindFirstChild("Gun"))) then
+			local mud = getMurderer()
+			if mud then
+				local r = getRoot(mud)
+				if r then
+					local gun = c:FindFirstChild("Gun") or (LP.Backpack and LP.Backpack:FindFirstChild("Gun"))
+					if gun then
+						if not c:FindFirstChild("Gun") then
+							h:EquipTool(gun)
+						else
+							local tp = r.Position
+							if mud.Character and mud.Character:FindFirstChild("Head") then tp = mud.Character.Head.Position end
+							CAM.CFrame = CAM.CFrame:Lerp(CFrame.new(CAM.CFrame.Position, tp), 0.3)
+							gun:Activate()
 						end
 					end
 				end
+			end
+		end
+		-- Murderer Knife Alert
+		if knifeAlert then
+			local mud = getMurderer()
+			local kn = mud and mud.Character and (mud.Character:FindFirstChild("Knife") or mud.Character:FindFirstChild("RealKnife"))
+			if kn then
+				foot.Text = "  ⚠️ MURDERER HAS KNIFE OUT! (" .. mud.Name .. ") ⚠️"
+				foot.TextColor3 = Color3.fromRGB(255, 50, 50)
+			else
+				foot.Text = "  - \u{1F412}  ] \u{1F5E1}  = \u{1F441}  |  v1.0"
+				foot.TextColor3 = Color3.fromRGB(140, 140, 140)
+			end
+		end
+		updateFOVCircle()
+	end
+end))
+-- Auto Collect
+spawn(function()
+	while wait(0.3) do
+		if acCoins then
+			local mp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+			if mp then
+				local active = getActiveCoins()
+				for _,v in ipairs(active) do
+					if (mp.Position-v.Position).Magnitude<100 then
+						firetouchinterest(mp, v, 0)
+						firetouchinterest(mp, v, 1)
+					end
+				end
+			end
+		end
+		if autoGrabGun and (currentRole ~= "Sheriff" and currentRole ~= "Hero") then
+			local gunDrop = workspace:FindFirstChild("GunDrop") or workspace:FindFirstChild("DroppedGun")
+			local c = LP.Character
+			local root = c and c:FindFirstChild("HumanoidRootPart")
+			if gunDrop and root then
+				firetouchinterest(root, gunDrop, 0)
+				firetouchinterest(root, gunDrop, 1)
 			end
 		end
 		if acEquip then
@@ -753,64 +908,61 @@ end))
 -- ESP
 local espF=Instance.new("Folder"); espF.Name="MM2ESP"; espF.Parent=CG
 local espO={}
-local function mkESP(p)
-	if p==LP then return end
-	local c=p.Character
-	if not c then
-		c=p.CharacterAdded:Wait()
+local function updateESP()
+	if not espEnabled then
+		for _,o in pairs(espO) do if o and o.bg then o.bg.Enabled=false end end
+		return
 	end
-	local r=c:WaitForChild("HumanoidRootPart", 5)
-	if not r then return end
-	local bg=Instance.new("BillboardGui"); bg.Name=p.Name; bg.Size=UDim2.new(0,200,0,60); bg.StudsOffset=Vector3.new(0,3,0)
-	bg.AlwaysOnTop=true; bg.Adornee=r; bg.Parent=espF
-	local nl=Instance.new("TextLabel"); nl.Size=UDim2.new(1,0,0,18); nl.BackgroundTransparency=0.3; nl.BackgroundColor3=Color3.new(0,0,0)
-	nl.TextColor3=Color3.new(1,1,1); nl.Text=p.Name; nl.Font=Enum.Font.ArimoBold; nl.TextSize=14; nl.TextStrokeTransparency=0; nl.Parent=bg
-	local rl=Instance.new("TextLabel"); rl.Size=UDim2.new(1,0,0,16); rl.Position=UDim2.new(0,0,0,18)
-	rl.BackgroundTransparency=0.3; rl.BackgroundColor3=Color3.new(0,0,0); rl.TextColor3=Color3.new(1,1,1); rl.Text=""
-	rl.Font=Enum.Font.ArimoBold; rl.TextSize=13; rl.TextStrokeTransparency=0; rl.Parent=bg
-	local dl=Instance.new("TextLabel"); dl.Size=UDim2.new(1,0,0,16); dl.Position=UDim2.new(0,0,0,34)
-	dl.BackgroundTransparency=0.3; dl.BackgroundColor3=Color3.new(0,0,0); dl.TextColor3=Color3.new(0.8,0.8,0.8); dl.Text=""
-	dl.Font=Enum.Font.ArimoBold; dl.TextSize=12; dl.TextStrokeTransparency=0; dl.Parent=bg
-	espO[p]={bg=bg,nl=nl,rl=rl,dl=dl,plr=p}
-end
-local function onCharAdded(p)
-	p.CharacterAdded:Connect(function()
-		if espO[p] and espO[p].bg then pcall(function() espO[p].bg:Destroy() end) end
-		mkESP(p)
-	end)
-end
-for _,p in Players:GetPlayers() do onCharAdded(p); spawn(function() mkESP(p) end) end
-Players.PlayerAdded:Connect(function(p)
-	onCharAdded(p)
-	spawn(function() mkESP(p) end)
-end)
-Players.PlayerRemoving:Connect(function(p) local o=espO[p]; if o and o.bg then pcall(function() o.bg:Destroy() end) end; espO[p]=nil end)
-ac(RSv.RenderStepped:Connect(function()
-	if not espEnabled then for _,o in pairs(espO) do if o and o.bg then o.bg.Enabled=false end end return end
-	for _,o in pairs(espO) do
-		if o and o.bg and o.plr then
-			local p=o.plr; local r=getRoot(p)
-			if not r then o.bg.Enabled=false; continue end
-			o.bg.Enabled=true
-			local role=getRole(p)
-			local dead=(playerData and playerData[p.Name] and playerData[p.Name].Dead) or false
-			if not dead and p.Character then
-				local h=p.Character:FindFirstChildOfClass("Humanoid")
-				if h and h.Health<=0 then dead=true end
+	local myPos=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+	for _,p in ipairs(Players:GetPlayers()) do
+		if p ~= LP then
+			local char = p.Character
+			local root = char and char:FindFirstChild("HumanoidRootPart")
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			if root and hum and hum.Health > 0 then
+				local o = espO[p]
+				if not o or not o.bg or o.bg.Parent == nil then
+					if o and o.bg then pcall(function() o.bg:Destroy() end) end
+					local bg=Instance.new("BillboardGui"); bg.Name=p.Name; bg.Size=UDim2.new(0,200,0,60); bg.StudsOffset=Vector3.new(0,3,0)
+					bg.AlwaysOnTop=true; bg.Adornee=root; bg.Parent=espF
+					local nl=Instance.new("TextLabel"); nl.Size=UDim2.new(1,0,0,18); nl.BackgroundTransparency=0.3; nl.BackgroundColor3=Color3.new(0,0,0)
+					nl.TextColor3=Color3.new(1,1,1); nl.Text=p.Name; nl.Font=Enum.Font.ArimoBold; nl.TextSize=14; nl.TextStrokeTransparency=0; nl.Parent=bg
+					local rl=Instance.new("TextLabel"); rl.Size=UDim2.new(1,0,0,16); rl.Position=UDim2.new(0,0,0,18)
+					rl.BackgroundTransparency=0.3; rl.BackgroundColor3=Color3.new(0,0,0); rl.TextColor3=Color3.new(1,1,1); rl.Text=""
+					rl.Font=Enum.Font.ArimoBold; rl.TextSize=13; rl.TextStrokeTransparency=0; rl.Parent=bg
+					local dl=Instance.new("TextLabel"); dl.Size=UDim2.new(1,0,0,16); dl.Position=UDim2.new(0,0,0,34)
+					dl.BackgroundTransparency=0.3; dl.BackgroundColor3=Color3.new(0,0,0); dl.TextColor3=Color3.new(0.8,0.8,0.8); dl.Text=""
+					dl.Font=Enum.Font.ArimoBold; dl.TextSize=12; dl.TextStrokeTransparency=0; dl.Parent=bg
+					espO[p]={bg=bg,nl=nl,rl=rl,dl=dl,plr=p}
+					o = espO[p]
+				end
+				o.bg.Enabled=true
+				o.bg.Adornee=root
+				local role=getRole(p)
+				local dead=(playerData and playerData[p.Name] and playerData[p.Name].Dead) or false
+				local dist=myPos and (myPos.Position-root.Position).Magnitude or 0
+				local col
+				if dead then col=Color3.new(0.5,0.5,0.5); role=role.." (Dead)"
+				elseif highlVics and currentRole=="Murderer" and role~="Murderer" then col=Color3.new(1,0.4,1)
+				elseif role=="Murderer" then col=Color3.fromRGB(255,50,50)
+				elseif role=="Sheriff" then col=Color3.fromRGB(50,150,255)
+				else col=Color3.fromRGB(50,255,50) end
+				o.nl.TextColor3=col; o.nl.Text=p.Name.." ["..math.floor(dist).."m]"
+				o.rl.Text=espShowRole and role or ""; o.dl.Text=espShowDist and math.floor(dist).." studs" or ""
+			else
+				local o = espO[p]
+				if o and o.bg then o.bg.Enabled=false end
 			end
-			local mp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-			local dist=mp and (mp.Position-r.Position).Magnitude or 0
-			local col
-			if dead then col=Color3.new(0.5,0.5,0.5); role=role.." (Dead)"
-			elseif highlVics and currentRole=="Murderer" and role~="Murderer" then col=Color3.new(1,0.4,1)
-			elseif role=="Murderer" then col=Color3.new(1,0.2,0.2)
-			elseif role=="Sheriff" then col=Color3.new(0.2,0.5,1)
-			else col=Color3.new(0.2,1,0.2) end
-			o.nl.TextColor3=col; o.nl.Text=p.Name.." ["..math.floor(dist).."m]"
-			o.rl.Text=espShowRole and role or ""; o.dl.Text=espShowDist and math.floor(dist).." studs" or ""
 		end
 	end
-end))
+	for p,o in pairs(espO) do
+		if not Players:FindFirstChild(p.Name) then
+			if o.bg then pcall(function() o.bg:Destroy() end) end
+			espO[p]=nil
+		end
+	end
+end
+ac(RSv.RenderStepped:Connect(updateESP))
 -- Weapon ESP
 local wepF=Instance.new("Folder"); wepF.Name="MM2WeaponESP"; wepF.Parent=CG
 local wepO={}
@@ -822,56 +974,78 @@ local function updateWepESP()
 	end
 	for _,o in pairs(wepO) do if o and o.bg then o.bg.Enabled=false end end
 	local seen={}
-	local function isHeldByPlayer(tool)
-		local p=tool.Parent
-		while p do
-			if p:IsA("Model") and p:FindFirstChildOfClass("Humanoid") then return true end
-			if p==workspace then return false end
-			p=p.Parent
-		end
-		return false
-	end
-	for _,v in workspace:GetDescendants() do
-		if v:IsA("Tool") and not isHeldByPlayer(v) then
-			local handle=v:FindFirstChild("Handle") or v:FindFirstChildOfClass("Part") or v:FindFirstChildOfClass("MeshPart")
+	-- Detect only dropped guns in workspace
+	for _, v in ipairs(workspace:GetChildren()) do
+		if v.Name == "GunDrop" or v.Name == "DroppedGun" or (v:IsA("Tool") and v.Name == "Gun" and v.Parent == workspace) then
+			local handle = v:FindFirstChild("Handle") or v:FindFirstChildOfClass("Part") or v:FindFirstChildOfClass("MeshPart") or v
 			if handle then
-				local id=v:GetDebugId()
-				local isGun=v.Name:lower():find("gun") and true or false
-				if not isGun and not v.Name:lower():find("knife") then isGun=true end
-				seen[id]=true
+				local id = v:GetDebugId()
+				seen[id] = true
 				if not wepTracked[id] then
-					wepTracked[id]=true
-					local bg=Instance.new("BillboardGui"); bg.Size=UDim2.new(0,160,0,40); bg.StudsOffset=Vector3.new(0,2.5,0)
-					bg.AlwaysOnTop=true; bg.Adornee=handle; bg.Parent=wepF
-					local nl=Instance.new("TextLabel"); nl.Size=UDim2.new(1,0,0,20); nl.BackgroundTransparency=0.4; nl.BackgroundColor3=Color3.new(0,0,0)
-					nl.TextColor3=isGun and Color3.fromRGB(50,150,255) or Color3.fromRGB(255,50,50)
-					nl.Text=isGun and "SHERIFF GUN" or "KNIFE"
-					nl.Font=Enum.Font.ArimoBold; nl.TextSize=14; nl.TextStrokeTransparency=0; nl.Parent=bg
-					local dl=Instance.new("TextLabel"); dl.Size=UDim2.new(1,0,0,16); dl.Position=UDim2.new(0,0,0,20)
-					dl.BackgroundTransparency=0.4; dl.BackgroundColor3=Color3.new(0,0,0); dl.TextColor3=Color3.fromRGB(200,200,200); dl.Text=""
-					dl.Font=Enum.Font.ArimoBold; dl.TextSize=11; dl.TextStrokeTransparency=0; dl.Parent=bg
-					wepO[id]={bg=bg,nl=nl,dl=dl,handle=handle,isGun=isGun}
+					wepTracked[id] = true
+					local bg = Instance.new("BillboardGui"); bg.Size = UDim2.new(0, 160, 0, 40); bg.StudsOffset = Vector3.new(0, 2.5, 0)
+					bg.AlwaysOnTop = true; bg.Adornee = handle; bg.Parent = wepF
+					local nl = Instance.new("TextLabel"); nl.Size = UDim2.new(1, 0, 0, 20); nl.BackgroundTransparency = 0.4; nl.BackgroundColor3 = Color3.new(0, 0, 0)
+					nl.TextColor3 = Color3.fromRGB(50, 150, 255)
+					nl.Text = "DROPPED GUN"
+					nl.Font = Enum.Font.ArimoBold; nl.TextSize = 12; nl.TextStrokeTransparency = 0; nl.Parent = bg
+					local dl = Instance.new("TextLabel"); dl.Size = UDim2.new(1, 0, 0, 16); dl.Position = UDim2.new(0, 0, 0, 20)
+					dl.BackgroundTransparency = 0.4; dl.BackgroundColor3 = Color3.new(0, 0, 0); dl.TextColor3 = Color3.fromRGB(200, 200, 200); dl.Text = ""
+					dl.Font = Enum.Font.ArimoBold; dl.TextSize = 11; dl.TextStrokeTransparency = 0; dl.Parent = bg
+					wepO[id] = {bg = bg, nl = nl, dl = dl, handle = handle}
 				else
-					local o=wepO[id]
+					local o = wepO[id]
 					if o then
-						o.bg.Enabled=true; o.bg.Adornee=handle
-						local mp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-						local dist=mp and (mp.Position-handle.Position).Magnitude or 0
-						o.dl.Text=math.floor(dist).." studs"
+						o.bg.Enabled = true
+						o.bg.Adornee = handle
+						local mp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+						local dist = mp and (mp.Position - handle.Position).Magnitude or 0
+						o.dl.Text = math.floor(dist) .. " studs"
 					end
 				end
 			end
 		end
 	end
-end
-for id,o in pairs(wepO) do
-	if not seen[id] then
-		wepTracked[id]=nil
-		if o.bg then pcall(function() o.bg:Destroy() end) end
-		wepO[id]=nil
+	for id,o in pairs(wepO) do
+		if not seen[id] then
+			wepTracked[id]=nil
+			if o.bg then pcall(function() o.bg:Destroy() end) end
+			wepO[id]=nil
+		end
 	end
 end
-
+local function getActiveCoins()
+	local list = {}
+	local containers = {}
+	for _, v in ipairs(workspace:GetChildren()) do
+		if v.Name == "Normal" or v.Name == "Map" or v:IsA("Model") then
+			local cc = v:FindFirstChild("CoinContainer", true)
+			if cc then table.insert(containers, cc) end
+		end
+	end
+	local coinContainer = workspace:FindFirstChild("CoinContainer", true)
+	if coinContainer then table.insert(containers, coinContainer) end
+	if #containers > 0 then
+		for _, container in ipairs(containers) do
+			for _, child in ipairs(container:GetChildren()) do
+				if child:IsA("BasePart") and (child.Name == "Coin" or child.Name == "Coin_Server") and child:FindFirstChild("TouchInterest") then
+					table.insert(list, child)
+				end
+			end
+		end
+	else
+		for _, child in ipairs(workspace:GetChildren()) do
+			if child.Name == "Normal" or child.Name == "Map" or child:IsA("Model") then
+				for _, sub in ipairs(child:GetDescendants()) do
+					if sub:IsA("BasePart") and (sub.Name == "Coin" or sub.Name == "Coin_Server") and sub:FindFirstChild("TouchInterest") then
+						table.insert(list, sub)
+					end
+				end
+			end
+		end
+	end
+	return list
+end
 -- Coin ESP
 local coinF=Instance.new("Folder"); coinF.Name="MM2CoinESP"; coinF.Parent=CG
 local coinO={}
@@ -882,21 +1056,20 @@ local function updateCoinESP()
 	end
 	for _,o in pairs(coinO) do if o and o.bg then o.bg.Enabled=false end end
 	local seen={}
-	for _,v in workspace:GetDescendants() do
-		if v:IsA("Part") and v.Name=="Coin" and v:FindFirstChild("TouchInterest") then
-			local id=v:GetDebugId()
-			seen[id]=true
-			if not coinO[id] then
-				local bg=Instance.new("BillboardGui"); bg.Size=UDim2.new(0,80,0,24); bg.StudsOffset=Vector3.new(0,1.5,0)
-				bg.AlwaysOnTop=true; bg.Adornee=v; bg.Parent=coinF
-				local nl=Instance.new("TextLabel"); nl.Size=UDim2.new(1,0,1,0); nl.BackgroundTransparency=0.4; nl.BackgroundColor3=Color3.new(0,0,0)
-				nl.TextColor3=Color3.fromRGB(255,200,50); nl.Text="COIN"
-				nl.Font=Enum.Font.ArimoBold; nl.TextSize=11; nl.TextStrokeTransparency=0; nl.Parent=bg
-				coinO[id]={bg=bg,nl=nl}
-			else
-				local o=coinO[id]
-				if o and o.bg then o.bg.Enabled=true; o.bg.Adornee=v end
-			end
+	local active = getActiveCoins()
+	for _,v in ipairs(active) do
+		local id=v:GetDebugId()
+		seen[id]=true
+		if not coinO[id] then
+			local bg=Instance.new("BillboardGui"); bg.Size=UDim2.new(0,80,0,24); bg.StudsOffset=Vector3.new(0,1.5,0)
+			bg.AlwaysOnTop=true; bg.Adornee=v; bg.Parent=coinF
+			local nl=Instance.new("TextLabel"); nl.Size=UDim2.new(1,0,1,0); nl.BackgroundTransparency=0.4; nl.BackgroundColor3=Color3.new(0,0,0)
+			nl.TextColor3=Color3.fromRGB(255,200,50); nl.Text="COIN"
+			nl.Font=Enum.Font.ArimoBold; nl.TextSize=11; nl.TextStrokeTransparency=0; nl.Parent=bg
+			coinO[id]={bg=bg,nl=nl}
+		else
+			local o=coinO[id]
+			if o and o.bg then o.bg.Enabled=true; o.bg.Adornee=v end
 		end
 	end
 	for id,o in pairs(coinO) do

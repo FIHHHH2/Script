@@ -5,13 +5,12 @@ local UIS=game:GetService("UserInputService")
 local RSv=game:GetService("RunService")
 local LP=Players.LocalPlayer
 local CAM=workspace.CurrentCamera
-
+if _G.MM2_HookActive ~= nil then _G.MM2_HookActive = false end
 if _G.MM2C then for _,c in ipairs(_G.MM2C) do if c and typeof(c)=="RBXScriptConnection" and c.Connected then c:Disconnect() end end end
 _G.MM2C={}
+_G.MM2_HookActive = true
 local function ac(c) table.insert(_G.MM2C,c) end
-
 for _,n in ipairs({"MM2HackMenu","MM2ESP","MM2CoinESP","MM2WeaponESP"}) do local g=CG:FindFirstChild(n) if g then g:Destroy() end end
-
 -- State
 local espEnabled=true local espShowRole=true local espShowDist=true local wepEsp=true local coinEsp=true
 local aimEnabled=false local aimFOV=150 local aimPart="Head" local aimShowFOV=true
@@ -22,11 +21,9 @@ local jpEnabled=false local jpVal=50
 local ncEnabled=false local bhEnabled=false local fovEnabled=false local fovVal=90
 local acCoins=false local acEquip=false
 local bgT=0.9 local curLay=1 local custBg=nil
-
 local playerData={} local currentRole="Innocent"
 local Remotes=RS:FindFirstChild("Remotes")
 local GPR=Remotes and Remotes:FindFirstChild("Gameplay")
-
 local function fetchPD()
 	local gd=GPR and GPR:FindFirstChild("GetCurrentPlayerData")
 	if gd then
@@ -40,7 +37,6 @@ if pdc then ac(pdc.OnClientEvent:Connect(function(d) playerData=d or {}
 		if d and d[LP.Name] then currentRole=d[LP.Name].Role or "Innocent" end end)) end
 fetchPD()
 spawn(function() while wait(5) do fetchPD() end end)
-
 -- Fast role detection (checks tools as fallback)
 local function getRoleFast(p)
 	local pdRole=playerData and playerData[p.Name] and playerData[p.Name].Role
@@ -56,7 +52,6 @@ local function getRoleFast(p)
 	end
 	return pdRole or "Innocent"
 end
-
 local function getRole(p) return getRoleFast(p) end
 local function getDead(p) return (playerData and playerData[p.Name] and playerData[p.Name].Dead) or false end
 local function getChar(p)
@@ -70,7 +65,6 @@ local function getAlive()
 	for _,p in Players:GetPlayers() do if p~=LP and getChar(p) then table.insert(l,p) end end
 	return l
 end
-
 -- FOV circle
 local fovGui=Instance.new("ScreenGui"); fovGui.Name="MM2FOV"; fovGui.Parent=CG; fovGui.ResetOnSpawn=false
 local fovCircle=Instance.new("ImageLabel")
@@ -78,7 +72,6 @@ fovCircle.Size=UDim2.new(0,300,0,300); fovCircle.Position=UDim2.new(0.5,-150,0.5
 fovCircle.BackgroundTransparency=1; fovCircle.Image="rbxassetid://2665432973"
 fovCircle.ImageColor3=Color3.fromRGB(80,160,255); fovCircle.ImageTransparency=0.6
 fovCircle.Visible=false; fovCircle.Parent=fovGui
-
 local function updateFOVCircle()
 	if aimEnabled and aimShowFOV then
 		local sz=math.tan(math.rad(aimFOV/2))*CAM.ViewportSize.Y
@@ -87,10 +80,10 @@ local function updateFOVCircle()
 		fovCircle.Visible=true
 	else fovCircle.Visible=false end
 end
-
-local function getNearestOnScreen(f)
+local function getNearestOnScreen(f, checkMurdererOnly)
 	local n,nd=nil,f or math.huge
 	for _,p in getAlive() do
+		if checkMurdererOnly and getRole(p) ~= "Murderer" then continue end
 		local r=getRoot(p)
 		if r then
 			local sp,on=CAM:WorldToViewportPoint(r.Position)
@@ -102,11 +95,59 @@ local function getNearestOnScreen(f)
 	end
 	return n,nd
 end
+local function getSilentAimTarget()
+	if not silAim then return nil, nil end
+	local c=LP.Character; if not c then return nil, nil end
+	local hasGun=c:FindFirstChild("Gun")
+	local hasKnife=c:FindFirstChild("Knife")
+	if not (hasGun or hasKnife) then return nil, nil end
 
+	local checkMurdererOnly=false
+	if hasGun or currentRole=="Sheriff" or currentRole=="Hero" then
+		checkMurdererOnly=true
+	end
+
+	local target,dist=getNearestOnScreen(silFOV,checkMurdererOnly)
+	if target and target.Character then
+		local targetRoot=getRoot(target)
+		if targetRoot then
+			local tp=targetRoot.Position
+			local head=target.Character:FindFirstChild("Head")
+			if head then tp=head.Position end
+
+			if hasKnife then
+				local knifeSpeed=40
+				local myPos=CAM.CFrame.Position
+				local targetVel=targetRoot.AssemblyLinearVelocity
+				local t=(tp-myPos).Magnitude/knifeSpeed
+				tp=tp+targetVel*t
+				local drop=14*t*t
+				tp=tp+Vector3.new(0,drop,0)
+			end
+			return CFrame.new(tp),head or targetRoot
+		end
+	end
+	return nil, nil
+end
+pcall(function()
+	local playerMouse=LP:GetMouse()
+	local oldIndex
+	oldIndex=hookmetamethod(game,"__index",function(self,key)
+		if _G.MM2_HookActive and not checkcaller() and self==playerMouse then
+			if key=="Hit" then
+				local targetCF,targetPart=getSilentAimTarget()
+				if targetCF then return targetCF end
+			elseif key=="Target" then
+				local targetCF,targetPart=getSilentAimTarget()
+				if targetPart then return targetPart end
+			end
+		end
+		return oldIndex(self,key)
+	end)
+end)
 -- UI
 local gui=Instance.new("ScreenGui")
 gui.Name="MM2HackMenu"; gui.Parent=CG; gui.ResetOnSpawn=false
-
 local main=Instance.new("Frame")
 main.Size=UDim2.new(0,520,0,560)
 main.Position=UDim2.new(0.5,-260,0.5,-280)
@@ -116,10 +157,8 @@ main.BorderSizePixel=0
 main.Active=true
 main.Draggable=false
 main.Parent=gui
-
 local corner=Instance.new("UICorner"); corner.CornerRadius=UDim.new(0,12); corner.Parent=main
 local stroke=Instance.new("UIStroke"); stroke.Color=Color3.fromRGB(60,60,60); stroke.Thickness=1.5; stroke.Parent=main
-
 -- Title bar (drag handle)
 local title=Instance.new("TextLabel")
 title.Size=UDim2.new(1,0,0,44)
@@ -135,7 +174,6 @@ local tCorner=Instance.new("UICorner"); tCorner.CornerRadius=UDim.new(0,12); tCo
 -- clip bottom corners so only top is rounded
 local titleClip=Instance.new("Frame"); titleClip.Size=UDim2.new(1,0,0,6); titleClip.Position=UDim2.new(0,0,1,-6)
 titleClip.BackgroundColor3=Color3.fromRGB(10,10,10); titleClip.BackgroundTransparency=0.15; titleClip.BorderSizePixel=0; titleClip.Parent=title
-
 local dragD, dragOff
 title.InputBegan:Connect(function(i)
 	if i.UserInputType==Enum.UserInputType.MouseButton1 then
@@ -150,7 +188,6 @@ ac(RSv.RenderStepped:Connect(function()
 	local mp=UIS:GetMouseLocation()
 	main.Position=UDim2.new(0,mp.X+dragOff.X,0,mp.Y+dragOff.Y)
 end))
-
 local closeBtn=Instance.new("TextButton")
 closeBtn.Size=UDim2.new(0,32,0,32)
 closeBtn.Position=UDim2.new(1,-40,0,6)
@@ -166,7 +203,6 @@ local cCorner=Instance.new("UICorner"); cCorner.CornerRadius=UDim.new(0,8); cCor
 closeBtn.MouseButton1Click:Connect(function() gui:Destroy() end)
 closeBtn.MouseEnter:Connect(function() closeBtn.BackgroundColor3=Color3.fromRGB(200,40,40); closeBtn.BackgroundTransparency=0 end)
 closeBtn.MouseLeave:Connect(function() closeBtn.BackgroundColor3=Color3.fromRGB(40,40,40); closeBtn.BackgroundTransparency=0.5 end)
-
 -- Left sidebar with tabs
 local sideBg=52
 local tabNames={"AIMBOT","MURDERER","ESP","PLAYER","WORLD","UI"}
@@ -176,7 +212,6 @@ local tabBtns={}
 local tabConts={}
 local activeTab=1
 local L={bg=Color3.fromRGB(10,10,10),accent=Color3.fromRGB(80,160,255),text=Color3.fromRGB(220,220,220),border=Color3.fromRGB(60,60,60)}
-
 local function setTab(i)
 	for j,b in ipairs(tabBtns) do
 		b.BackgroundColor3=j==i and L.accent or Color3.fromRGB(18,18,18)
@@ -189,7 +224,6 @@ local function setTab(i)
 	for j,c in ipairs(tabConts) do c.Visible=j==i end
 	activeTab=i
 end
-
 local side=Instance.new("Frame")
 side.Size=UDim2.new(0,sideBg,0,1)
 side.Position=UDim2.new(0,0,0,44)
@@ -197,7 +231,6 @@ side.BackgroundColor3=Color3.fromRGB(15,15,15)
 side.BackgroundTransparency=0.2
 side.BorderSizePixel=0
 side.Parent=main
-
 for i=1,#tabNames do
 	local btn=Instance.new("TextButton")
 	btn.Size=UDim2.new(1,0,0,60)
@@ -209,17 +242,14 @@ for i=1,#tabNames do
 	btn.Parent=side
 	tabBtns[i]=btn
 	local btnCor=Instance.new("UICorner"); btnCor.CornerRadius=UDim.new(0,8); btnCor.Parent=btn
-
 	local lb=Instance.new("TextLabel")
 	lb.Name="Label"; lb.Size=UDim2.new(1,-4,0,18); lb.Position=UDim2.new(0,2,0,30)
 	lb.BackgroundTransparency=1; lb.TextColor3=i==1 and Color3.fromRGB(255,255,255) or Color3.fromRGB(140,140,140)
 	lb.Text=tabLabels[i]; lb.Font=Enum.Font.ArimoBold; lb.TextSize=10; lb.Parent=btn
-
 	local ic=Instance.new("TextLabel")
 	ic.Name="Icon"; ic.Size=UDim2.new(1,0,0,24); ic.Position=UDim2.new(0,0,0,8)
 	ic.BackgroundTransparency=1; ic.TextColor3=i==1 and Color3.fromRGB(255,255,255) or Color3.fromRGB(140,140,140)
 	ic.Text=tabIcons[i]; ic.Font=Enum.Font.ArimoBold; ic.TextSize=16; ic.Parent=btn
-
 	local cont=Instance.new("ScrollingFrame")
 	cont.Size=UDim2.new(1,-(sideBg+14),1,-70)
 	cont.Position=UDim2.new(0,sideBg+8,0,48)
@@ -231,12 +261,10 @@ for i=1,#tabNames do
 	cont.Visible=i==1
 	cont.Parent=main
 	tabConts[i]=cont
-
 	local lay=Instance.new("UIListLayout")
 	lay.Padding=UDim.new(0,3); lay.SortOrder=Enum.SortOrder.LayoutOrder; lay.Parent=cont
 	btn.MouseButton1Click:Connect(function() setTab(i) end)
 end
-
 -- Footer
 local foot=Instance.new("TextLabel")
 foot.Size=UDim2.new(1,0,0,22)
@@ -249,7 +277,6 @@ foot.Font=Enum.Font.ArimoBold
 foot.TextSize=11
 foot.TextXAlignment=Enum.TextXAlignment.Left
 foot.Parent=main
-
 -- Resize grip
 local grip=Instance.new("TextButton")
 grip.Size=UDim2.new(0,14,0,14); grip.Position=UDim2.new(1,-14,1,-14)
@@ -273,7 +300,6 @@ ac(RSv.RenderStepped:Connect(function()
 	local nw=math.max(380,resSize.X+d.X); local nh=math.max(380,resSize.Y+d.Y)
 	main.Size=UDim2.new(0,nw,0,nh)
 end))
-
 -- UI helpers
 local function addSec(s,t)
 	local f=Instance.new("Frame"); f.Size=UDim2.new(1,-10,0,28); f.BackgroundTransparency=1; f.Parent=s
@@ -346,7 +372,6 @@ local function addSlider(s,label,mi,ma,init,cb,suf)
 	s.CanvasSize=UDim2.new(0,0,0,s.UIListLayout.AbsoluteContentSize.Y+10)
 	return r
 end
-
 -- Populate Tabs
 -- TAB 1: AIMBOT
 addSec(tabConts[1],"Aimbot")
@@ -357,7 +382,6 @@ addTog(tabConts[1],"Team Check",true,function(s) end)
 addSec(tabConts[1],"Silent Aim")
 addTog(tabConts[1],"Silent Aim",silAim,function(s) silAim=s end)
 addSlider(tabConts[1],"Silent FOV",10,360,silFOV,function(v) silFOV=v end,"")
-
 -- TAB 2: MURDERER
 addSec(tabConts[2],"Combat")
 addTog(tabConts[2],"Auto-Stab",autoStab,function(s) autoStab=s end)
@@ -377,7 +401,6 @@ local function updateMurderInfo()
 	murderInfo.TextColor3=isM and Color3.fromRGB(255,50,50) or Color3.fromRGB(200,200,200)
 end
 spawn(function() while wait(1) do updateMurderInfo() end end)
-
 -- TAB 3: ESP
 addSec(tabConts[3],"Player ESP")
 addTog(tabConts[3],"ESP Enabled",espEnabled,function(s) espEnabled=s end)
@@ -387,7 +410,6 @@ addBtn(tabConts[3],"Refresh Player Data",fetchPD)
 addSec(tabConts[3],"World ESP")
 addTog(tabConts[3],"Weapon ESP",wepEsp,function(s) wepEsp=s end)
 addTog(tabConts[3],"Coin ESP",coinEsp,function(s) coinEsp=s end)
-
 -- TAB 4: PLAYER
 addSec(tabConts[4],"Movement")
 addTog(tabConts[4],"WalkSpeed",wsEnabled,function(s) wsEnabled=s end)
@@ -412,7 +434,6 @@ Players.PlayerAdded:Connect(function(p)
 			if r and mr then mr.CFrame=r.CFrame+Vector3.new(0,3,0) end
 		end) end
 end)
-
 -- TAB 5: WORLD
 addSec(tabConts[5],"Auto")
 addTog(tabConts[5],"Auto Collect Coins",acCoins,function(s) acCoins=s end)
@@ -423,7 +444,6 @@ infoL.Size=UDim2.new(1,-10,0,40); infoL.BackgroundTransparency=0.7; infoL.Backgr
 infoL.TextColor3=L.text; infoL.Text="Role: "..currentRole; infoL.Font=Enum.Font.ArimoBold
 infoL.TextSize=12; infoL.TextXAlignment=Enum.TextXAlignment.Left; infoL.Parent=tabConts[5]
 spawn(function() while wait(1) do infoL.Text="Your Role: "..currentRole.." | Players: "..#Players:GetPlayers() end end)
-
 -- Layout system
 local layouts={
 	{name="Default",bg=Color3.fromRGB(10,10,10),accent=Color3.fromRGB(80,160,255),text=Color3.fromRGB(220,220,220),border=Color3.fromRGB(60,60,60)},
@@ -449,7 +469,6 @@ local layouts={
 }
 local curLayIdx=1
 local layBtns={}
-
 local function applyLayout(idx)
 	local l=layouts[idx]
 	if not l then return end
@@ -491,13 +510,11 @@ local function applyLayout(idx)
 		b.TextColor3=Color3.fromRGB(255,255,255)
 	end
 end
-
 local custBGs={
 	{"Black",Color3.fromRGB(0,0,0)},{"Dark Gray",Color3.fromRGB(15,15,15)},{"Charcoal",Color3.fromRGB(25,25,25)},
 	{"Navy",Color3.fromRGB(10,15,35)},{"Dark Red",Color3.fromRGB(30,5,5)},{"Dark Green",Color3.fromRGB(5,20,5)},
 	{"Dark Purple",Color3.fromRGB(20,5,30)},{"Dark Brown",Color3.fromRGB(30,20,10)},
 }
-
 -- TAB 6: UI
 addSec(tabConts[6],"Window")
 addBtn(tabConts[6],"Reset Position",function()
@@ -527,7 +544,6 @@ for ri=1,math.ceil(#layouts/4) do
 	end
 end
 applyLayout(1)
-
 addSec(tabConts[6],"Custom BG Color")
 local bgRow=Instance.new("Frame"); bgRow.Size=UDim2.new(1,-10,0,26); bgRow.BackgroundTransparency=1; bgRow.Parent=tabConts[6]
 local bgLay=Instance.new("UIListLayout"); bgLay.FillDirection=Enum.FillDirection.Horizontal; bgLay.Padding=UDim.new(0,4); bgLay.Wraps=true; bgLay.SortOrder=Enum.SortOrder.LayoutOrder; bgLay.Parent=bgRow
@@ -544,7 +560,6 @@ rndBg.TextColor3=Color3.fromRGB(150,150,150); rndBg.Text="RND"; rndBg.Font=Enum.
 rndBg.MouseButton1Click:Connect(function()
 	local l=layouts[curLayIdx]; l.bg=Color3.fromRGB(math.random(0,255),math.random(0,255),math.random(0,255)); applyLayout(curLayIdx)
 end)
-
 addSec(tabConts[6],"Accent Color")
 local accRow=Instance.new("Frame"); accRow.Size=UDim2.new(1,-10,0,26); accRow.BackgroundTransparency=1; accRow.Parent=tabConts[6]
 local accLay=Instance.new("UIListLayout"); accLay.FillDirection=Enum.FillDirection.Horizontal; accLay.Padding=UDim.new(0,4); accLay.Wraps=true; accLay.SortOrder=Enum.SortOrder.LayoutOrder; accLay.Parent=accRow
@@ -567,25 +582,21 @@ rndAcc.TextColor3=Color3.fromRGB(150,150,150); rndAcc.Text="RND"; rndAcc.Font=En
 rndAcc.MouseButton1Click:Connect(function()
 	local l=layouts[curLayIdx]; l.accent=Color3.fromRGB(math.random(0,255),math.random(0,255),math.random(0,255)); applyLayout(curLayIdx)
 end)
-
 addSec(tabConts[6],"Border Style")
 addBtn(tabConts[6],"Thin Border",function() main.BorderSizePixel=1 end)
 addBtn(tabConts[6],"Default Border",function() main.BorderSizePixel=2 end)
 addBtn(tabConts[6],"Thick Border",function() main.BorderSizePixel=4 end)
 addBtn(tabConts[6],"No Border",function() main.BorderSizePixel=0 end)
-
 addSec(tabConts[6],"Window Size")
 addBtn(tabConts[6],"Reset Size (520x560)",function() main.Size=UDim2.new(0,520,0,560) end)
 local sizeL=Instance.new("TextLabel")
 sizeL.Size=UDim2.new(1,-10,0,20); sizeL.BackgroundTransparency=1; sizeL.TextColor3=Color3.fromRGB(140,140,140)
 sizeL.Text="Drag corner to resize"; sizeL.Font=Enum.Font.ArimoBold; sizeL.TextSize=11; sizeL.Parent=tabConts[6]
-
 addSec(tabConts[6],"Title Style")
 addBtn(tabConts[6],"Default",function() title.Text="MM2 HACK" end)
 addBtn(tabConts[6],"Full Name",function() title.Text="MURDER MYSTERY 2" end)
 addBtn(tabConts[6],"Minimal",function() title.Text="MM2" end)
 addBtn(tabConts[6],"Fancy",function() title.Text="> mm2_hack" end)
-
 addSec(tabConts[6],"Transparency")
 local origTransparencies={}
 addSlider(tabConts[6],"BG Alpha",0,100,90,function(v)
@@ -606,7 +617,6 @@ addSlider(tabConts[6],"BG Alpha",0,100,90,function(v)
 		end
 	end
 end,"%")
-
 addSec(tabConts[6],"Settings")
 addBtn(tabConts[6],"Reset All Layouts",function()
 	local defs={
@@ -618,7 +628,6 @@ addBtn(tabConts[6],"Reset All Layouts",function()
 	end
 	applyLayout(curLayIdx)
 end)
-
 -- Movement/Systems
 ac(RSv.RenderStepped:Connect(function()
 	local c=LP.Character; if not c then return end
@@ -629,7 +638,8 @@ ac(RSv.RenderStepped:Connect(function()
 	if fovEnabled then CAM.FieldOfView=fovVal else CAM.FieldOfView=70 end
 	-- Aimbot
 	if aimEnabled then
-		local t=getNearestOnScreen(aimFOV)
+		local isSheriff = (currentRole == "Sheriff" or currentRole == "Hero" or (c:FindFirstChild("Gun")) or (LP.Backpack and LP.Backpack:FindFirstChild("Gun")))
+		local t=getNearestOnScreen(aimFOV, isSheriff)
 		if t then
 			local r=getRoot(t)
 			if r then
@@ -675,6 +685,16 @@ ac(RSv.RenderStepped:Connect(function()
 				if r then
 					local tp=r.Position+Vector3.new(0,2,0)
 					if n.Character and n.Character:FindFirstChild("Head") then tp=n.Character.Head.Position end
+
+					-- Knife throw prediction
+					local knifeSpeed=40
+					local myPos=CAM.CFrame.Position
+					local targetVel=r.AssemblyLinearVelocity
+					local t=(tp-myPos).Magnitude/knifeSpeed
+					tp=tp+targetVel*t
+					local drop=14*t*t
+					tp=tp+Vector3.new(0,drop,0)
+
 					local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Blacklist; params.FilterDescendantsInstances={LP.Character,n.Character}
 					local dir=(tp-CAM.CFrame.Position).Unit; local dist=(tp-CAM.CFrame.Position).Magnitude
 					local hit=workspace:Raycast(CAM.CFrame.Position,dir*dist,params)
@@ -685,30 +705,8 @@ ac(RSv.RenderStepped:Connect(function()
 			end
 		end
 	end
-	-- Silent aim (redirects mouse to nearest target when holding gun)
-	if silAim and currentRole=="Sheriff" then
-		local silTool=c:FindFirstChild("Gun")
-		if silTool then
-			local mouse=LP:GetMouse()
-			local sn=getNearestOnScreen(silFOV)
-			if sn then
-				local sr=getRoot(sn)
-				if sr then
-					local stp=sr.Position+Vector3.new(0,2,0)
-					if sn.Character and sn.Character:FindFirstChild("Head") then stp=sn.Character.Head.Position end
-					local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Blacklist; params.FilterDescendantsInstances={LP.Character,sn.Character}
-					local sdir=(stp-CAM.CFrame.Position).Unit; local sdist=(stp-CAM.CFrame.Position).Magnitude
-					local shit=workspace:Raycast(CAM.CFrame.Position,sdir*sdist,params)
-					if not shit then
-						mouse.Hit=CFrame.new(CAM.CFrame.Position,stp)
-					end
-				end
-			end
-		end
-	end
 	updateFOVCircle()
 end))
-
 -- Auto Collect
 spawn(function()
 	while wait(0.5) do
@@ -737,7 +735,6 @@ spawn(function()
 		end
 	end
 end)
-
 -- Bunny Hop
 ac(UIS.InputBegan:Connect(function(i,gp)
 	if gp then return end
@@ -746,7 +743,6 @@ ac(UIS.InputBegan:Connect(function(i,gp)
 		if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
 	end
 end))
-
 -- Keybinds
 ac(UIS.InputBegan:Connect(function(i,gp)
 	if gp then return end
@@ -754,7 +750,6 @@ ac(UIS.InputBegan:Connect(function(i,gp)
 	if i.KeyCode==Enum.KeyCode.RightBracket then gui.Enabled=not gui.Enabled; if toggles["Toggle GUI (])"] then toggles["Toggle GUI (])"](gui.Enabled) end end
 	if i.KeyCode==Enum.KeyCode.Equals then espEnabled=not espEnabled; if toggles["ESP Enabled"] then toggles["ESP Enabled"](espEnabled) end end
 end))
-
 -- ESP
 local espF=Instance.new("Folder"); espF.Name="MM2ESP"; espF.Parent=CG
 local espO={}
@@ -790,7 +785,6 @@ Players.PlayerAdded:Connect(function(p)
 	spawn(function() mkESP(p) end)
 end)
 Players.PlayerRemoving:Connect(function(p) local o=espO[p]; if o and o.bg then pcall(function() o.bg:Destroy() end) end; espO[p]=nil end)
-
 ac(RSv.RenderStepped:Connect(function()
 	if not espEnabled then for _,o in pairs(espO) do if o and o.bg then o.bg.Enabled=false end end return end
 	for _,o in pairs(espO) do
@@ -817,12 +811,10 @@ ac(RSv.RenderStepped:Connect(function()
 		end
 	end
 end))
-
 -- Weapon ESP
 local wepF=Instance.new("Folder"); wepF.Name="MM2WeaponESP"; wepF.Parent=CG
 local wepO={}
 local wepTracked={}
-
 local function updateWepESP()
 	if not wepEsp then
 		for _,o in pairs(wepO) do if o and o.bg then o.bg.Enabled=false end end
@@ -914,7 +906,6 @@ local function updateCoinESP()
 		end
 	end
 end
-
 -- Real-time weapon detection
 ac(workspace.DescendantAdded:Connect(function(v)
 	if v:IsA("Tool") then
@@ -935,5 +926,4 @@ spawn(function()
 		pcall(updateCoinESP)
 	end
 end)
-
 print("MM2 Hack v1.0 loaded! -=bhop, ]=toggle, ==ESP")

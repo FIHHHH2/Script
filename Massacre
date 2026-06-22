@@ -44,20 +44,20 @@ local espEnabled = true
 local espIgnoreRegulars = false
 local espShowDistance = true
 local espShowHealth = true
-local espFillTransparency = 0.75
-local espOutlineTransparency = 0.1
+local espFillTransparency = 1
+local espOutlineTransparency = 0.75
 
 local itemEspEnabled = true
-local itemEspFillTransparency = 0.4
-local itemEspOutlineTransparency = 0.2
+local itemEspFillTransparency = 1
+local itemEspOutlineTransparency = 0.75
 
 local breakerEspEnabled = true
-local breakerEspFillTransparency = 0.4
-local breakerEspOutlineTransparency = 0.2
+local breakerEspFillTransparency = 1
+local breakerEspOutlineTransparency = 0.75
 
 local aimbotEnabled = false
 local aimbotFOV = 150
-local aimbotSmoothing = 5
+local aimbotSmoothing = 1
 local aimbotTargetPart = "Head"
 local aimbotShowFOV = true
 local aimbotCurrentTarget = nil
@@ -81,12 +81,12 @@ end
 
 local weaponConfigBackup = {}
 local weaponModifiers = {
-	noSpread = false,
-	noRecoil = false,
-	rapidFire = false,
-	instantReload = false,
+	noSpread = true,
+	noRecoil = true,
+	rapidFire = true,
+	instantReload = true,
 	infiniteAmmo = false,
-	allAuto = false,
+	allAuto = true,
 }
 
 local meleeModifiers = {
@@ -237,6 +237,8 @@ local function restoreWeaponConfigs()
 		config.AimRecoilMult = backup.AimRecoilMult
 	end
 end
+
+applyWeaponModifiers()
 
 -- FOV Circle
 local fovCircle = Drawing and Drawing.new("Circle") or nil
@@ -2171,12 +2173,12 @@ createToggleRow(espContainer, "ShowHealthToggle", "Show Health", 142, true, func
 	updateESP()
 end)
 
-createSliderRow(espContainer, "FillTransparency", "Fill Transparency", 186, 0.75, 0.0, 1.0, 0.05, "%.2f", function(val)
+createSliderRow(espContainer, "FillTransparency", "Fill Transparency", 186, 1, 0.0, 1.0, 0.05, "%.2f", function(val)
 	espFillTransparency = val
 	updateESP()
 end)
 
-createSliderRow(espContainer, "OutlineTransparency", "Outline Transparency", 230, 0.1, 0.0, 1.0, 0.05, "%.2f", function(val)
+createSliderRow(espContainer, "OutlineTransparency", "Outline Transparency", 230, 0.75, 0.0, 1.0, 0.05, "%.2f", function(val)
 	espOutlineTransparency = val
 	updateESP()
 end)
@@ -2186,12 +2188,12 @@ createToggleRow(espContainer, "ItemESPToggle", "Item ESP", 274, true, function(s
 	updateItemESP()
 end)
 
-createSliderRow(espContainer, "ItemFillTransparency", "Item Fill Transparency", 318, 0.4, 0.0, 1.0, 0.05, "%.2f", function(val)
+createSliderRow(espContainer, "ItemFillTransparency", "Item Fill Transparency", 318, 1, 0.0, 1.0, 0.05, "%.2f", function(val)
 	itemEspFillTransparency = val
 	updateItemESP()
 end)
 
-createSliderRow(espContainer, "ItemOutlineTransparency", "Item Outline Transparency", 362, 0.2, 0.0, 1.0, 0.05, "%.2f", function(val)
+createSliderRow(espContainer, "ItemOutlineTransparency", "Item Outline Transparency", 362, 0.75, 0.0, 1.0, 0.05, "%.2f", function(val)
 	itemEspOutlineTransparency = val
 	updateItemESP()
 end)
@@ -2201,12 +2203,12 @@ createToggleRow(espContainer, "BreakerESPToggle", "Electrical Box ESP", 406, tru
 	updateBreakerESP()
 end)
 
-createSliderRow(espContainer, "BreakerFillTransparency", "Breaker Fill Transparency", 450, 0.4, 0.0, 1.0, 0.05, "%.2f", function(val)
+createSliderRow(espContainer, "BreakerFillTransparency", "Breaker Fill Transparency", 450, 1, 0.0, 1.0, 0.05, "%.2f", function(val)
 	breakerEspFillTransparency = val
 	updateBreakerESP()
 end)
 
-createSliderRow(espContainer, "BreakerOutlineTransparency", "Breaker Outline Transparency", 494, 0.2, 0.0, 1.0, 0.05, "%.2f", function(val)
+createSliderRow(espContainer, "BreakerOutlineTransparency", "Breaker Outline Transparency", 494, 0.75, 0.0, 1.0, 0.05, "%.2f", function(val)
 	breakerEspOutlineTransparency = val
 	updateBreakerESP()
 end)
@@ -2220,7 +2222,7 @@ createSliderRow(aimbotContainer, "FOV", "FOV Radius", 54, 150, 20, 500, 10, "%dp
 	aimbotFOV = val
 end)
 
-createSliderRow(aimbotContainer, "Smooth", "Smoothness", 98, 5, 1, 20, 1, "%d", function(val)
+createSliderRow(aimbotContainer, "Smooth", "Smoothness", 98, 1, 1, 20, 1, "%d", function(val)
 	aimbotSmoothing = val
 end)
 
@@ -2233,22 +2235,22 @@ createToggleRow(aimbotContainer, "ShowFOV", "Show FOV Circle", 186, true, functi
 end)
 
 -- ===================== POPULATE: WEAPONS TAB =====================
-createToggleRow(weaponsContainer, "NoSpread", "No Spread", 10, false, function(state)
+createToggleRow(weaponsContainer, "NoSpread", "No Spread", 10, true, function(state)
 	weaponModifiers.noSpread = state
 	applyWeaponModifiers()
 end)
 
-createToggleRow(weaponsContainer, "NoRecoil", "No Recoil", 52, false, function(state)
+createToggleRow(weaponsContainer, "NoRecoil", "No Recoil", 52, true, function(state)
 	weaponModifiers.noRecoil = state
 	applyWeaponModifiers()
 end)
 
-createToggleRow(weaponsContainer, "RapidFire", "Rapid Fire (3x)", 94, false, function(state)
+createToggleRow(weaponsContainer, "RapidFire", "Rapid Fire (3x)", 94, true, function(state)
 	weaponModifiers.rapidFire = state
 	applyWeaponModifiers()
 end)
 
-createToggleRow(weaponsContainer, "InstantReload", "Instant Reload", 136, false, function(state)
+createToggleRow(weaponsContainer, "InstantReload", "Instant Reload", 136, true, function(state)
 	weaponModifiers.instantReload = state
 	applyWeaponModifiers()
 end)
@@ -2258,7 +2260,7 @@ createToggleRow(weaponsContainer, "InfiniteAmmo", "Infinite Ammo", 178, false, f
 	applyWeaponModifiers()
 end)
 
-createToggleRow(weaponsContainer, "AllAuto", "All Guns Full-Auto", 220, false, function(state)
+createToggleRow(weaponsContainer, "AllAuto", "All Guns Full-Auto", 220, true, function(state)
 	weaponModifiers.allAuto = state
 	applyWeaponModifiers()
 end)

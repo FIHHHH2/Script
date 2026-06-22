@@ -41,6 +41,22 @@ if pdc then ac(pdc.OnClientEvent:Connect(function(d) playerData=d or {}
 fetchPD()
 spawn(function() while wait(5) do fetchPD() end end)
 
+-- Fast role detection (checks tools as fallback)
+local function getRoleFast(p)
+	local pdRole=playerData and playerData[p.Name] and playerData[p.Name].Role
+	if pdRole and pdRole~="Innocent" then return pdRole end
+	local c=p.Character; local bp=p.Backpack
+	if c then
+		if c:FindFirstChild("Knife") then return "Murderer" end
+		if c:FindFirstChild("Gun") then return "Sheriff" end
+	end
+	if bp then
+		if bp:FindFirstChild("Knife") then return "Murderer" end
+		if bp:FindFirstChild("Gun") then return "Sheriff" end
+	end
+	return pdRole or "Innocent"
+end
+
 local function getRole(p) return getRoleFast(p) end
 local function getDead(p) return (playerData and playerData[p.Name] and playerData[p.Name].Dead) or false end
 local function getChar(p)
@@ -54,6 +70,7 @@ local function getAlive()
 	for _,p in Players:GetPlayers() do if p~=LP and getChar(p) then table.insert(l,p) end end
 	return l
 end
+
 -- FOV circle
 local fovGui=Instance.new("ScreenGui"); fovGui.Name="MM2FOV"; fovGui.Parent=CG; fovGui.ResetOnSpawn=false
 local fovCircle=Instance.new("ImageLabel")
@@ -69,22 +86,6 @@ local function updateFOVCircle()
 		fovCircle.Position=UDim2.new(0.5,-sz,0.5,-sz)
 		fovCircle.Visible=true
 	else fovCircle.Visible=false end
-end
-
--- Fast role detection (checks tools as fallback)
-local function getRoleFast(p)
-	local pdRole=playerData and playerData[p.Name] and playerData[p.Name].Role
-	if pdRole and pdRole~="Innocent" then return pdRole end
-	local c=p.Character; local bp=p.Backpack
-	if c then
-		if c:FindFirstChild("Knife") then return "Murderer" end
-		if c:FindFirstChild("Gun") then return "Sheriff" end
-	end
-	if bp then
-		if bp:FindFirstChild("Knife") then return "Murderer" end
-		if bp:FindFirstChild("Gun") then return "Sheriff" end
-	end
-	return pdRole or "Innocent"
 end
 
 local function getNearestOnScreen(f)
@@ -425,7 +426,7 @@ spawn(function() while wait(1) do infoL.Text="Your Role: "..currentRole.." | Pla
 
 -- Layout system
 local layouts={
-	{name="Monochrome",bg=Color3.fromRGB(10,10,10),accent=Color3.fromRGB(160,160,160),text=Color3.fromRGB(255,255,255),border=Color3.fromRGB(80,80,80)},
+	{name="Default",bg=Color3.fromRGB(10,10,10),accent=Color3.fromRGB(80,160,255),text=Color3.fromRGB(220,220,220),border=Color3.fromRGB(60,60,60)},
 	{name="Cyberpunk",bg=Color3.fromRGB(5,8,25),accent=Color3.fromRGB(0,180,255),text=Color3.fromRGB(200,255,240),border=Color3.fromRGB(0,80,140)},
 	{name="Matrix",bg=Color3.fromRGB(0,8,0),accent=Color3.fromRGB(0,220,0),text=Color3.fromRGB(100,255,100),border=Color3.fromRGB(0,70,0)},
 	{name="Blood",bg=Color3.fromRGB(25,3,3),accent=Color3.fromRGB(220,30,30),text=Color3.fromRGB(255,200,200),border=Color3.fromRGB(100,15,15)},
@@ -608,14 +609,12 @@ end,"%")
 
 addSec(tabConts[6],"Settings")
 addBtn(tabConts[6],"Reset All Layouts",function()
-	for i,l in ipairs(layouts) do
-		local defs={
-	{name="Monochrome",bg=Color3.fromRGB(20,20,20),accent=Color3.fromRGB(160,160,160),text=Color3.fromRGB(255,255,255),border=Color3.fromRGB(100,100,100)},
-			{name="Cyberpunk",bg=Color3.fromRGB(10,10,30),accent=Color3.fromRGB(0,200,255),text=Color3.fromRGB(0,255,200),border=Color3.fromRGB(0,100,150)},
-		}
-		local def
-		for _,d in ipairs(defs) do if d.name==l.name then def=d; break end end
-		if def then l.bg=def.bg; l.accent=def.accent; l.text=def.text; l.border=def.border end
+	local defs={
+		{name="Default",bg=Color3.fromRGB(10,10,10),accent=Color3.fromRGB(80,160,255),text=Color3.fromRGB(220,220,220),border=Color3.fromRGB(60,60,60)},
+		{name="Cyberpunk",bg=Color3.fromRGB(5,8,25),accent=Color3.fromRGB(0,180,255),text=Color3.fromRGB(200,255,240),border=Color3.fromRGB(0,80,140)},
+	}
+	for _,l in ipairs(layouts) do
+		for _,d in ipairs(defs) do if d.name==l.name then l.bg=d.bg; l.accent=d.accent; l.text=d.text; l.border=d.border; break end end
 	end
 	applyLayout(curLayIdx)
 end)
@@ -740,8 +739,12 @@ local espF=Instance.new("Folder"); espF.Name="MM2ESP"; espF.Parent=CG
 local espO={}
 local function mkESP(p)
 	if p==LP then return end
-	local c=p.Character; if not c then return end
-	local r=c:FindFirstChild("HumanoidRootPart"); if not r then return end
+	local c=p.Character
+	if not c then
+		c=p.CharacterAdded:Wait()
+	end
+	local r=c:WaitForChild("HumanoidRootPart", 5)
+	if not r then return end
 	local bg=Instance.new("BillboardGui"); bg.Name=p.Name; bg.Size=UDim2.new(0,200,0,60); bg.StudsOffset=Vector3.new(0,3,0)
 	bg.AlwaysOnTop=true; bg.Adornee=r; bg.Parent=espF
 	local nl=Instance.new("TextLabel"); nl.Size=UDim2.new(1,0,0,18); nl.BackgroundTransparency=0.3; nl.BackgroundColor3=Color3.new(0,0,0)
@@ -754,11 +757,16 @@ local function mkESP(p)
 	dl.Font=Enum.Font.ArimoBold; dl.TextSize=12; dl.TextStrokeTransparency=0; dl.Parent=bg
 	espO[p]={bg=bg,nl=nl,rl=rl,dl=dl,plr=p}
 end
-for _,p in Players:GetPlayers() do mkESP(p) end
+local function onCharAdded(p)
+	p.CharacterAdded:Connect(function()
+		if espO[p] and espO[p].bg then pcall(function() espO[p].bg:Destroy() end) end
+		mkESP(p)
+	end)
+end
+for _,p in Players:GetPlayers() do onCharAdded(p); spawn(function() mkESP(p) end) end
 Players.PlayerAdded:Connect(function(p)
-	p.CharacterAdded:Connect(function() wait()
-		if espO[p] and espO[p].bg then pcall(function() espO[p].bg:Destroy() end) end; mkESP(p) end)
-	if p.Character then mkESP(p) end
+	onCharAdded(p)
+	spawn(function() mkESP(p) end)
 end)
 Players.PlayerRemoving:Connect(function(p) local o=espO[p]; if o and o.bg then pcall(function() o.bg:Destroy() end) end; espO[p]=nil end)
 
@@ -769,7 +777,12 @@ ac(RSv.RenderStepped:Connect(function()
 			local p=o.plr; local r=getRoot(p)
 			if not r then o.bg.Enabled=false; continue end
 			o.bg.Enabled=true
-			local role=getRole(p); local dead=getDead(p)
+			local role=getRole(p)
+			local dead=(playerData and playerData[p.Name] and playerData[p.Name].Dead) or false
+			if not dead and p.Character then
+				local h=p.Character:FindFirstChildOfClass("Humanoid")
+				if h and h.Health<=0 then dead=true end
+			end
 			local mp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
 			local dist=mp and (mp.Position-r.Position).Magnitude or 0
 			local col
@@ -797,18 +810,18 @@ local function updateWepESP()
 	for _,o in pairs(wepO) do if o and o.bg then o.bg.Enabled=false end end
 	local seen={}
 	for _,v in workspace:GetDescendants() do
-		if v:IsA("Tool") and (v.Name=="Gun" or v.Name=="Knife") then
-			if v.Parent==workspace or (v.Parent and v.Parent:IsA("Model") and not v.Parent:FindFirstChildOfClass("Humanoid")) then
-				local handle=v:FindFirstChild("Handle") or v:FindFirstChildOfClass("Part") or v:FindFirstChildOfClass("MeshPart")
-				if handle then
-					local id=v:GetDebugId()
-					seen[id]=true
+		if v:IsA("Tool") and v.Parent==workspace then
+			local handle=v:FindFirstChild("Handle") or v:FindFirstChildOfClass("Part") or v:FindFirstChildOfClass("MeshPart")
+			if handle then
+				local id=v:GetDebugId()
+				local isGun=v.Name:lower():find("gun") and true or false
+				if not isGun and not v.Name:lower():find("knife") then isGun=true end
+				seen[id]=true
 					if not wepTracked[id] then
 						wepTracked[id]=true
 						local bg=Instance.new("BillboardGui"); bg.Size=UDim2.new(0,160,0,40); bg.StudsOffset=Vector3.new(0,2.5,0)
 						bg.AlwaysOnTop=true; bg.Adornee=handle; bg.Parent=wepF
 						local nl=Instance.new("TextLabel"); nl.Size=UDim2.new(1,0,0,20); nl.BackgroundTransparency=0.4; nl.BackgroundColor3=Color3.new(0,0,0)
-						local isGun=v.Name=="Gun"
 						nl.TextColor3=isGun and Color3.fromRGB(50,150,255) or Color3.fromRGB(255,50,50)
 						nl.Text=isGun and "SHERIFF GUN" or "KNIFE"
 						nl.Font=Enum.Font.ArimoBold; nl.TextSize=14; nl.TextStrokeTransparency=0; nl.Parent=bg

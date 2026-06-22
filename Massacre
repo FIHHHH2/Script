@@ -1306,20 +1306,20 @@ screenGui.Parent = CoreGui
 
 -- Modern Theme Colors
 local THEME = {
-	bg = Color3.fromRGB(8, 10, 20),
-	bgSecondary = Color3.fromRGB(15, 18, 32),
-	panel = Color3.fromRGB(20, 24, 42),
-	accent = Color3.fromRGB(100, 200, 255),
-	accentDim = Color3.fromRGB(70, 140, 200),
-	accentBright = Color3.fromRGB(150, 220, 255),
-	text = Color3.fromRGB(240, 242, 250),
-	textDim = Color3.fromRGB(140, 145, 165),
-	border = Color3.fromRGB(50, 60, 90),
-	borderLight = Color3.fromRGB(80, 95, 135),
-	toggleOn = Color3.fromRGB(100, 200, 255),
-	toggleOff = Color3.fromRGB(45, 50, 70),
-	itemBtn = Color3.fromRGB(25, 32, 55),
-	itemBtnHover = Color3.fromRGB(40, 50, 80),
+	bg = Color3.fromRGB(10, 10, 16),
+	bgSecondary = Color3.fromRGB(16, 16, 26),
+	panel = Color3.fromRGB(22, 22, 36),
+	accent = Color3.fromRGB(100, 210, 255),
+	accentDim = Color3.fromRGB(60, 140, 200),
+	accentBright = Color3.fromRGB(150, 225, 255),
+	text = Color3.fromRGB(235, 240, 250),
+	textDim = Color3.fromRGB(130, 140, 170),
+	border = Color3.fromRGB(45, 50, 70),
+	borderLight = Color3.fromRGB(75, 85, 115),
+	toggleOn = Color3.fromRGB(100, 210, 255),
+	toggleOff = Color3.fromRGB(38, 42, 56),
+	itemBtn = Color3.fromRGB(22, 25, 40),
+	itemBtnHover = Color3.fromRGB(36, 42, 62),
 	success = Color3.fromRGB(80, 220, 130),
 }
 
@@ -1379,7 +1379,7 @@ mainStroke.Parent = mainFrame
 local resizing = false
 local resizeStart = Vector2.new(0, 0)
 local frameSizeStart = UDim2.new(0, 0, 0, 0)
-local minSize = UDim2.new(0, 350, 0, 400)
+local minSize = UDim2.new(0, 460, 0, 400)
 
 local resizeHandle = Instance.new("Frame")
 resizeHandle.Name = "ResizeHandle"
@@ -1483,30 +1483,35 @@ titleLine.Parent = titleBar
 
 makeDraggable(titleBar, mainFrame)
 
--- Tab bar
+-- Side tab bar
+local TAB_WIDTH = 128
 local tabBar = Instance.new("Frame")
 tabBar.Name = "TabBar"
-tabBar.Size = UDim2.new(1, 0, 0, 36)
+tabBar.Size = UDim2.new(0, TAB_WIDTH, 1, -48)
 tabBar.Position = UDim2.new(0, 0, 0, 48)
-tabBar.BackgroundTransparency = 1
+tabBar.BackgroundColor3 = THEME.bg
+tabBar.BorderSizePixel = 0
 tabBar.Parent = mainFrame
 
-local tabLine = Instance.new("Frame")
-tabLine.Size = UDim2.new(1, 0, 0, 1)
-tabLine.Position = UDim2.new(0, 0, 1, 0)
-tabLine.BackgroundColor3 = THEME.border
-tabLine.BorderSizePixel = 0
-tabLine.Parent = tabBar
+local tabBarLine = Instance.new("Frame")
+tabBarLine.Size = UDim2.new(0, 1, 1, 0)
+tabBarLine.Position = UDim2.new(1, -1, 0, 0)
+tabBarLine.BackgroundColor3 = THEME.border
+tabBarLine.BorderSizePixel = 0
+tabBarLine.Parent = tabBar
 
-local tabNames = {"ITEMS", "ESP", "AIMBOT", "WEAPONS"}
+local tabNames = {"PLAYER", "ITEMS", "ESP", "AIMBOT", "WEAPONS", "GAME"}
+local tabIcons = {"👤", "🗡️", "👁️", "🎯", "🔧", "⚙️"}
 local tabButtons = {}
 local tabContainers = {}
 local numTabs = #tabNames
+local TAB_HEIGHT = 44
 
+-- Active indicator
 local activeIndicator = Instance.new("Frame")
 activeIndicator.Name = "Indicator"
-activeIndicator.Size = UDim2.new(1/numTabs, -12, 0, 3)
-activeIndicator.Position = UDim2.new(0, 6, 1, -3)
+activeIndicator.Size = UDim2.new(0, 3, 0, TAB_HEIGHT - 10)
+activeIndicator.Position = UDim2.new(0, 0, 0, 8 + (0) * TAB_HEIGHT)
 activeIndicator.BackgroundColor3 = THEME.accent
 activeIndicator.BorderSizePixel = 0
 activeIndicator.Parent = tabBar
@@ -1517,23 +1522,31 @@ indCorner.Parent = activeIndicator
 
 local contentFrame = Instance.new("Frame")
 contentFrame.Name = "Content"
-contentFrame.Size = UDim2.new(1, -4, 1, -88)
-contentFrame.Position = UDim2.new(0, 2, 0, 84)
+contentFrame.Size = UDim2.new(1, -(TAB_WIDTH + 4), 1, -(48 + 26))
+contentFrame.Position = UDim2.new(0, TAB_WIDTH, 0, 52)
 contentFrame.BackgroundTransparency = 1
+contentFrame.ClipsDescendants = false
 contentFrame.Parent = mainFrame
 
 for i, tabName in ipairs(tabNames) do
 	local btn = Instance.new("TextButton")
 	btn.Name = tabName .. "Tab"
-	btn.Size = UDim2.new(1/numTabs, 0, 1, 0)
-	btn.Position = UDim2.new((i-1)/numTabs, 0, 0, 0)
-	btn.BackgroundTransparency = 1
+	btn.Size = UDim2.new(1, -8, 0, TAB_HEIGHT)
+	btn.Position = UDim2.new(0, 4, 0, 6 + (i-1) * TAB_HEIGHT)
+	btn.BackgroundTransparency = i == 1 and 0.92 or 1
+	btn.BackgroundColor3 = THEME.accent
 	btn.Font = Enum.Font.GothamBold
-	btn.Text = tabName
+	btn.Text = tabIcons[i] .. "  " .. tabName
 	btn.TextColor3 = i == 1 and THEME.accent or THEME.textDim
 	btn.TextSize = 11
+	btn.TextXAlignment = Enum.TextXAlignment.Left
+	btn.AutoButtonColor = false
 	btn.Parent = tabBar
 	tabButtons[i] = btn
+
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 6)
+	btnCorner.Parent = btn
 
 	local container = Instance.new("ScrollingFrame")
 	container.Name = tabName .. "Container"
@@ -1551,20 +1564,23 @@ for i, tabName in ipairs(tabNames) do
 	btn.MouseButton1Click:Connect(function()
 		for j, c in ipairs(tabContainers) do
 			c.Visible = j == i
-			TweenService:Create(tabButtons[j], TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
-				TextColor3 = j == i and THEME.accent or THEME.textDim
+			TweenService:Create(tabButtons[j], TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+				TextColor3 = j == i and THEME.accent or THEME.textDim,
+				BackgroundTransparency = j == i and 0.92 or 1
 			}):Play()
 		end
-		TweenService:Create(activeIndicator, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			Position = UDim2.new((i-1)/numTabs, 6, 1, -3)
+		TweenService:Create(activeIndicator, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+			Position = UDim2.new(0, 0, 0, 8 + (i-1) * TAB_HEIGHT)
 		}):Play()
 	end)
 end
 
-local itemsContainer = tabContainers[1]
-local espContainer = tabContainers[2]
-local aimbotContainer = tabContainers[3]
-local weaponsContainer = tabContainers[4]
+local playerContainer = tabContainers[1]
+local itemsContainer = tabContainers[2]
+local espContainer = tabContainers[3]
+local aimbotContainer = tabContainers[4]
+local weaponsContainer = tabContainers[5]
+local gameContainer = tabContainers[6]
 
 -- ===================== UI HELPERS =====================
 local function createToggleRow(parent, name, labelText, yOffset, defaultState, callback)
@@ -2043,84 +2059,9 @@ createSliderRow(itemsContainer, "PushItemDelay", "Item Delay", 294, 0.12, 0.05, 
 	pushItemDelay = val
 end)
 
--- ===================== AUDIO CONFIG =====================
-local audioHeader = Instance.new("TextLabel")
-audioHeader.Size = UDim2.new(0.92, 0, 0, 24)
-audioHeader.Position = UDim2.new(0.04, 0, 0, 338)
-audioHeader.BackgroundTransparency = 1
-audioHeader.Font = Enum.Font.GothamBlack
-audioHeader.Text = "🔊 AUDIO"
-audioHeader.TextColor3 = THEME.accent
-audioHeader.TextSize = 11
-audioHeader.TextXAlignment = Enum.TextXAlignment.Left
-audioHeader.Parent = itemsContainer
-
-local savedVoiceVol = nil
-createSliderRow(itemsContainer, "AudioVolume", "Volume", 366, 0.5, 0.0, 2.0, 0.05, "%.2fx", function(val)
-	pcall(function()
-		local gs = UserSettings():GetService("UserGameSettings")
-		if savedVoiceVol == nil then
-			savedVoiceVol = gs.VoiceVolume
-		end
-		gs.MasterVolume = val
-		gs.VoiceVolume = savedVoiceVol
-	end)
-end)
-
--- ===================== CAMERA CONFIG =====================
-local camHeader = Instance.new("TextLabel")
-camHeader.Size = UDim2.new(0.92, 0, 0, 24)
-camHeader.Position = UDim2.new(0.04, 0, 0, 394)
-camHeader.BackgroundTransparency = 1
-camHeader.Font = Enum.Font.GothamBlack
-camHeader.Text = "📷 CAMERA"
-camHeader.TextColor3 = THEME.accent
-camHeader.TextSize = 11
-camHeader.TextXAlignment = Enum.TextXAlignment.Left
-camHeader.Parent = itemsContainer
-
-local thirdPersonEnabled = false
-local zoomDistance = 100
-createToggleRow(itemsContainer, "ThirdPerson", "3rd Person", 422, false, function(state)
-	thirdPersonEnabled = state
-end)
-
-createSliderRow(itemsContainer, "MaxZoom", "Max Zoom", 466, 100, 10, 500, 10, "%d", function(val)
-	zoomDistance = val
-end)
-
-task.spawn(function()
-	while task.wait(1) do
-		if thirdPersonEnabled then
-			pcall(function()
-				LocalPlayer.CameraMode = Enum.CameraMode.Classic
-				LocalPlayer.CameraMaxZoomDistance = zoomDistance
-				LocalPlayer.CameraMinZoomDistance = 0.5
-			end)
-		end
-	end
-end)
-
-createToggleRow(itemsContainer, "Fullbright", "Fullbright", 510, false, function(state)
-	local lighting = game:GetService("Lighting")
-	if state then
-		lighting.Brightness = 2
-		lighting.Ambient = Color3.new(1, 1, 1)
-		lighting.FogEnd = 1e10
-		lighting.GlobalShadows = false
-		lighting.OutdoorAmbient = Color3.new(1, 1, 1)
-	else
-		lighting.Brightness = 1
-		lighting.Ambient = Color3.new(0, 0, 0)
-		lighting.FogEnd = 50000
-		lighting.GlobalShadows = true
-		lighting.OutdoorAmbient = Color3.new(0.7, 0.7, 0.7)
-	end
-end)
-
 -- Individual item buttons
 local allTools = getAllTools()
-local yPos = 554
+local yPos = 338
 
 for i, tool in ipairs(allTools) do
 	local itemBtn = Instance.new("TextButton")
@@ -2187,7 +2128,7 @@ refreshBtn.MouseButton1Click:Connect(function()
 		end
 	end
 	local newTools = getAllTools()
-	local newY = 554
+	local newY = 338
 	for _, tool in ipairs(newTools) do
 		local ib = Instance.new("TextButton")
 		ib.Name = "Item_" .. tool.Name
@@ -2309,6 +2250,207 @@ createToggleRow(aimbotContainer, "ShowFOV", "Show FOV Circle", 186, true, functi
 	aimbotShowFOV = state
 end)
 
+-- ===================== POPULATE: PLAYER TAB =====================
+local origWalkSpeed = 16
+local origJumpPower = 50
+local char = LocalPlayer.Character
+if char then
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		origWalkSpeed = hum.WalkSpeed
+		origJumpPower = hum.JumpPower
+	end
+end
+
+local walkSpeedVal = origWalkSpeed
+local jumpPowerVal = origJumpPower
+local charLoopRunning = false
+local noSlowdown = false
+
+local function startCharLoop()
+	if charLoopRunning then return end
+	charLoopRunning = true
+	task.spawn(function()
+		while charLoopRunning do
+			task.wait(noSlowdown and 0.1 or 0.5)
+			local c = LocalPlayer.Character
+			if c then
+				local hum = c:FindFirstChildOfClass("Humanoid")
+				if hum then
+					if noSlowdown or walkSpeedVal ~= origWalkSpeed then
+						hum.WalkSpeed = walkSpeedVal
+					end
+					if jumpPowerVal ~= origJumpPower then
+						hum.JumpPower = jumpPowerVal
+					end
+				end
+			end
+		end
+	end)
+end
+
+createToggleRow(playerContainer, "NoSlowdown", "No Slowdown", 10, false, function(state)
+	noSlowdown = state
+	startCharLoop()
+end)
+
+createSliderRow(playerContainer, "WalkSpeed", "Walk Speed", 54, origWalkSpeed, origWalkSpeed, 200, 1, "%d", function(val)
+	walkSpeedVal = val
+	startCharLoop()
+end)
+
+createSliderRow(playerContainer, "JumpPower", "Jump Power", 98, origJumpPower, origJumpPower, 500, 10, "%d", function(val)
+	jumpPowerVal = val
+	startCharLoop()
+end)
+
+local infiniteJumpEnabled = false
+createToggleRow(playerContainer, "InfiniteJump", "Infinite Jump", 142, false, function(state)
+	infiniteJumpEnabled = state
+	if state then
+		task.spawn(function()
+			while infiniteJumpEnabled do
+				task.wait(0.05)
+				local c = LocalPlayer.Character
+				if c and UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+					local hum = c:FindFirstChildOfClass("Humanoid")
+					local hrp = c:FindFirstChild("HumanoidRootPart")
+					if hum and hrp then
+						hum:ChangeState(Enum.HumanoidStateType.Jumping)
+						hrp.Velocity = Vector3.new(hrp.Velocity.X, jumpPowerVal * 0.7, hrp.Velocity.Z)
+					end
+				end
+			end
+		end)
+	end
+end)
+
+local airSwimEnabled = false
+local swimSpeedVal = 50
+local airSwimBody = nil
+local airSwimGyro = nil
+
+createToggleRow(playerContainer, "AirSwim", "Air Swim", 186, false, function(state)
+	airSwimEnabled = state
+	if state then
+		local uis = UserInputService
+		local conn
+		conn = RunService.Heartbeat:Connect(function()
+			if not airSwimEnabled then
+				conn:Disconnect()
+				if airSwimBody and airSwimBody.Parent then airSwimBody:Destroy() end
+				if airSwimGyro and airSwimGyro.Parent then airSwimGyro:Destroy() end
+				airSwimBody = nil
+				airSwimGyro = nil
+				local c = LocalPlayer.Character
+				if c then
+					local hum = c:FindFirstChildOfClass("Humanoid")
+					if hum then
+						hum.PlatformStand = false
+					end
+				end
+				return
+			end
+			local c = LocalPlayer.Character
+			if not c then return end
+			local hrp = c:FindFirstChild("HumanoidRootPart")
+			local hum = c:FindFirstChildOfClass("Humanoid")
+			if not hrp or not hum then return end
+
+			hum.PlatformStand = true
+			hum.AutoRotate = false
+			hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+			hum:SetStateEnabled(Enum.HumanoidStateType.Swimming, true)
+			hum:ChangeState(Enum.HumanoidStateType.Swimming)
+			hum.MaxSwimSpeed = swimSpeedVal
+
+			if not airSwimBody or not airSwimBody.Parent then
+				airSwimBody = Instance.new("BodyVelocity")
+				airSwimBody.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+				airSwimBody.P = 1e9
+				airSwimBody.Parent = hrp
+			end
+			if not airSwimGyro or not airSwimGyro.Parent then
+				airSwimGyro = Instance.new("BodyGyro")
+				airSwimGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+				airSwimGyro.P = 1e9
+				airSwimGyro.D = 100
+				airSwimGyro.Parent = hrp
+			end
+
+			local cam = workspace.CurrentCamera
+			local camCF = cam.CFrame
+			airSwimGyro.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + camCF.LookVector * Vector3.new(1, 0, 1))
+
+			local moveDir = Vector3.new(
+				(uis:IsKeyDown(Enum.KeyCode.D) and 1 or 0) - (uis:IsKeyDown(Enum.KeyCode.A) and 1 or 0),
+				(uis:IsKeyDown(Enum.KeyCode.Space) and 1 or 0) - (uis:IsKeyDown(Enum.KeyCode.LeftShift) and 1 or 0),
+				(uis:IsKeyDown(Enum.KeyCode.S) and 1 or 0) - (uis:IsKeyDown(Enum.KeyCode.W) and 1 or 0)
+			)
+			if moveDir.Magnitude > 0 then
+				moveDir = moveDir.Unit
+				local forward = (camCF.LookVector * Vector3.new(1, 0, 1)).Unit
+				local right = (camCF.RightVector * Vector3.new(1, 0, 1)).Unit
+				airSwimBody.Velocity = forward * -moveDir.Z * swimSpeedVal + right * moveDir.X * swimSpeedVal + Vector3.new(0, moveDir.Y * swimSpeedVal, 0)
+			else
+				local vel = hrp.Velocity
+				airSwimBody.Velocity = Vector3.new(vel.X * 0.9, -3, vel.Z * 0.9)
+			end
+		end)
+	else
+		if airSwimBody and airSwimBody.Parent then airSwimBody:Destroy() end
+		if airSwimGyro and airSwimGyro.Parent then airSwimGyro:Destroy() end
+		airSwimBody = nil
+		airSwimGyro = nil
+		local c = LocalPlayer.Character
+		if c then
+			local hum = c:FindFirstChildOfClass("Humanoid")
+			if hum then
+				hum.PlatformStand = false
+				hum.AutoRotate = true
+			end
+		end
+	end
+end)
+
+createSliderRow(playerContainer, "SwimSpeed", "Swim Speed", 230, 50, 10, 200, 5, "%d", function(val)
+	swimSpeedVal = val
+end)
+
+local bhopEnabled = false
+local bhopMaxSpeed = 120
+local bhopCurrentSpeed = 50
+createToggleRow(playerContainer, "BunnyHop", "Bunny Hop", 274, false, function(state)
+	bhopEnabled = state
+	if state then
+		bhopCurrentSpeed = 50
+		task.spawn(function()
+			while bhopEnabled do
+				task.wait(0.05)
+				local c = LocalPlayer.Character
+				if not c then continue end
+				local hrp = c:FindFirstChild("HumanoidRootPart")
+				local hum = c:FindFirstChildOfClass("Humanoid")
+				if not hrp or not hum then continue end
+				if UserInputService:IsKeyDown(Enum.KeyCode.Space) and (hum:GetState() == Enum.HumanoidStateType.Running or hum:GetState() == Enum.HumanoidStateType.Landed) then
+					hum:ChangeState(Enum.HumanoidStateType.Jumping)
+					bhopCurrentSpeed = math.min(bhopCurrentSpeed + 3, bhopMaxSpeed)
+					local vel = hrp.Velocity
+					local forward = (workspace.CurrentCamera.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+					local speed = math.max(vel.Magnitude, bhopCurrentSpeed)
+					hrp.Velocity = Vector3.new(forward.X * speed, jumpPowerVal * 0.7, forward.Z * speed)
+				elseif hum:GetState() ~= Enum.HumanoidStateType.Jumping and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
+					bhopCurrentSpeed = math.max(50, bhopCurrentSpeed - 1)
+				end
+			end
+		end)
+	end
+end)
+
+createSliderRow(playerContainer, "BhopMaxSpeed", "Bhop Max Speed", 318, 120, 30, 300, 10, "%d", function(val)
+	bhopMaxSpeed = val
+end)
+
 -- ===================== POPULATE: WEAPONS TAB =====================
 createToggleRow(weaponsContainer, "NoSpread", "No Spread", 10, true, function(state)
 	weaponModifiers.noSpread = state
@@ -2363,6 +2505,41 @@ end)
 createToggleRow(weaponsContainer, "MeleeAutoSwing", "Melee Auto Swing", 430, false, function(state)
 	meleeModifiers.allAuto = state
 	applyWeaponModifiers()
+end)
+
+-- ===================== POPULATE: GAME TAB =====================
+local audioHeader = Instance.new("TextLabel")
+audioHeader.Size = UDim2.new(0.92, 0, 0, 24)
+audioHeader.Position = UDim2.new(0.04, 0, 0, 10)
+audioHeader.BackgroundTransparency = 1
+audioHeader.Font = Enum.Font.GothamBlack
+audioHeader.Text = "🔊 AUDIO"
+audioHeader.TextColor3 = THEME.accent
+audioHeader.TextSize = 11
+audioHeader.TextXAlignment = Enum.TextXAlignment.Left
+audioHeader.Parent = gameContainer
+
+createSliderRow(gameContainer, "AudioVolume", "Master Volume", 38, 0.5, 0.0, 2.0, 0.05, "%.2fx", function(val)
+	pcall(function()
+		UserSettings():GetService("UserGameSettings").MasterVolume = val
+	end)
+end)
+
+local camHeader = Instance.new("TextLabel")
+camHeader.Size = UDim2.new(0.92, 0, 0, 24)
+camHeader.Position = UDim2.new(0.04, 0, 0, 82)
+camHeader.BackgroundTransparency = 1
+camHeader.Font = Enum.Font.GothamBlack
+camHeader.Text = "📷 CAMERA"
+camHeader.TextColor3 = THEME.accent
+camHeader.TextSize = 11
+camHeader.TextXAlignment = Enum.TextXAlignment.Left
+camHeader.Parent = gameContainer
+
+createSliderRow(gameContainer, "FieldOfView", "Field of View", 110, 70, 30, 120, 1, "%d", function(val)
+	pcall(function()
+		workspace.CurrentCamera.FieldOfView = val
+	end)
 end)
 
 -- ===================== FOOTER =====================

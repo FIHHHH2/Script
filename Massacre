@@ -2327,26 +2327,26 @@ end)
 
 local airSwimEnabled = false
 local swimSpeedVal = 50
-local airSwimBody = nil
-local airSwimGyro = nil
 
 createToggleRow(playerContainer, "AirSwim", "Air Swim", 186, false, function(state)
 	airSwimEnabled = state
 	if state then
 		local uis = UserInputService
+		local tick = 0
+		local bv = Instance.new("BodyVelocity")
+		bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+		bv.P = 1e9
 		local conn
 		conn = RunService.Heartbeat:Connect(function()
 			if not airSwimEnabled then
 				conn:Disconnect()
-				if airSwimBody and airSwimBody.Parent then airSwimBody:Destroy() end
-				if airSwimGyro and airSwimGyro.Parent then airSwimGyro:Destroy() end
-				airSwimBody = nil
-				airSwimGyro = nil
+				if bv and bv.Parent then bv:Destroy() end
 				local c = LocalPlayer.Character
 				if c then
 					local hum = c:FindFirstChildOfClass("Humanoid")
 					if hum then
-						hum.PlatformStand = false
+						hum.HipHeight = 0
+						hum:ChangeState(Enum.HumanoidStateType.Running)
 					end
 				end
 				return
@@ -2357,30 +2357,15 @@ createToggleRow(playerContainer, "AirSwim", "Air Swim", 186, false, function(sta
 			local hum = c:FindFirstChildOfClass("Humanoid")
 			if not hrp or not hum then return end
 
-			hum.PlatformStand = true
-			hum.AutoRotate = false
-			hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+			bv.Parent = hrp
+			hum.WalkSpeed = swimSpeedVal
+			hum.HipHeight = 3.5
 			hum:SetStateEnabled(Enum.HumanoidStateType.Swimming, true)
-			hum:ChangeState(Enum.HumanoidStateType.Swimming)
-			hum.MaxSwimSpeed = swimSpeedVal
 
-			if not airSwimBody or not airSwimBody.Parent then
-				airSwimBody = Instance.new("BodyVelocity")
-				airSwimBody.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-				airSwimBody.P = 1e9
-				airSwimBody.Parent = hrp
-			end
-			if not airSwimGyro or not airSwimGyro.Parent then
-				airSwimGyro = Instance.new("BodyGyro")
-				airSwimGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
-				airSwimGyro.P = 1e9
-				airSwimGyro.D = 100
-				airSwimGyro.Parent = hrp
-			end
+			local swim = pcall(function() hum:ChangeState(Enum.HumanoidStateType.Swimming) end)
 
-			local cam = workspace.CurrentCamera
-			local camCF = cam.CFrame
-			airSwimGyro.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + camCF.LookVector * Vector3.new(1, 0, 1))
+			tick = tick + 1
+			local bob = math.sin(tick * 0.08) * 0.8
 
 			local moveDir = Vector3.new(
 				(uis:IsKeyDown(Enum.KeyCode.D) and 1 or 0) - (uis:IsKeyDown(Enum.KeyCode.A) and 1 or 0),
@@ -2389,25 +2374,26 @@ createToggleRow(playerContainer, "AirSwim", "Air Swim", 186, false, function(sta
 			)
 			if moveDir.Magnitude > 0 then
 				moveDir = moveDir.Unit
-				local forward = (camCF.LookVector * Vector3.new(1, 0, 1)).Unit
-				local right = (camCF.RightVector * Vector3.new(1, 0, 1)).Unit
-				airSwimBody.Velocity = forward * -moveDir.Z * swimSpeedVal + right * moveDir.X * swimSpeedVal + Vector3.new(0, moveDir.Y * swimSpeedVal, 0)
+				local cam = workspace.CurrentCamera
+				local forward = (cam.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+				local right = (cam.CFrame.RightVector * Vector3.new(1, 0, 1)).Unit
+				bv.Velocity = forward * -moveDir.Z * swimSpeedVal + right * moveDir.X * swimSpeedVal + Vector3.new(0, moveDir.Y * swimSpeedVal + bob, 0)
 			else
-				local vel = hrp.Velocity
-				airSwimBody.Velocity = Vector3.new(vel.X * 0.9, -3, vel.Z * 0.9)
+				bv.Velocity = Vector3.new(0, -2 + bob, 0)
 			end
 		end)
 	else
-		if airSwimBody and airSwimBody.Parent then airSwimBody:Destroy() end
-		if airSwimGyro and airSwimGyro.Parent then airSwimGyro:Destroy() end
-		airSwimBody = nil
-		airSwimGyro = nil
 		local c = LocalPlayer.Character
 		if c then
+			local hrp = c:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				local b = hrp:FindFirstChildOfClass("BodyVelocity")
+				if b then b:Destroy() end
+			end
 			local hum = c:FindFirstChildOfClass("Humanoid")
 			if hum then
-				hum.PlatformStand = false
-				hum.AutoRotate = true
+				hum.HipHeight = 0
+				hum:ChangeState(Enum.HumanoidStateType.Running)
 			end
 		end
 	end
@@ -2426,21 +2412,26 @@ createToggleRow(playerContainer, "BunnyHop", "Bunny Hop", 274, false, function(s
 		bhopCurrentSpeed = 50
 		task.spawn(function()
 			while bhopEnabled do
-				task.wait(0.05)
+				task.wait()
 				local c = LocalPlayer.Character
 				if not c then continue end
 				local hrp = c:FindFirstChild("HumanoidRootPart")
 				local hum = c:FindFirstChildOfClass("Humanoid")
 				if not hrp or not hum then continue end
-				if UserInputService:IsKeyDown(Enum.KeyCode.Space) and (hum:GetState() == Enum.HumanoidStateType.Running or hum:GetState() == Enum.HumanoidStateType.Landed) then
-					hum:ChangeState(Enum.HumanoidStateType.Jumping)
+
+				local onGround = hum:GetState() == Enum.HumanoidStateType.Running or hum:GetState() == Enum.HumanoidStateType.Landed
+				if UserInputService:IsKeyDown(Enum.KeyCode.Space) and onGround then
 					bhopCurrentSpeed = math.min(bhopCurrentSpeed + 3, bhopMaxSpeed)
-					local vel = hrp.Velocity
 					local forward = (workspace.CurrentCamera.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
-					local speed = math.max(vel.Magnitude, bhopCurrentSpeed)
-					hrp.Velocity = Vector3.new(forward.X * speed, jumpPowerVal * 0.7, forward.Z * speed)
-				elseif hum:GetState() ~= Enum.HumanoidStateType.Jumping and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
-					bhopCurrentSpeed = math.max(50, bhopCurrentSpeed - 1)
+					hum:ChangeState(Enum.HumanoidStateType.Jumping)
+					hrp.Velocity = Vector3.new(forward.X * bhopCurrentSpeed, jumpPowerVal * 1.3, forward.Z * bhopCurrentSpeed)
+				elseif not onGround then
+					local vel = hrp.Velocity
+					local flatSpeed = Vector3.new(vel.X, 0, vel.Z).Magnitude
+					if flatSpeed < bhopCurrentSpeed then
+						local forward = (workspace.CurrentCamera.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+						hrp.Velocity = Vector3.new(forward.X * bhopCurrentSpeed, vel.Y, forward.Z * bhopCurrentSpeed)
+					end
 				end
 			end
 		end)
@@ -2449,6 +2440,69 @@ end)
 
 createSliderRow(playerContainer, "BhopMaxSpeed", "Bhop Max Speed", 318, 120, 30, 300, 10, "%d", function(val)
 	bhopMaxSpeed = val
+end)
+
+local ragdollEnabled = false
+createToggleRow(playerContainer, "RagdollWalk", "Ragdoll Walk", 362, false, function(state)
+	ragdollEnabled = state
+	local c = LocalPlayer.Character
+	if not c then return end
+	local hum = c:FindFirstChildOfClass("Humanoid")
+	local hrp = c:FindFirstChild("HumanoidRootPart")
+	if not hum or not hrp then return end
+
+	if state then
+		local bodyParts = {}
+		for _, v in ipairs(c:GetDescendants()) do
+			if v:IsA("BasePart") and v ~= hrp then
+				table.insert(bodyParts, v)
+				v.CanCollide = false
+			end
+		end
+		for _, v in ipairs(c:GetDescendants()) do
+			if v:IsA("Motor6D") then
+				v.Enabled = false
+			end
+		end
+		hrp.Anchored = true
+		local bv = Instance.new("BodyVelocity")
+		bv.MaxForce = Vector3.new(1e9, 0, 1e9)
+		bv.P = 1e9
+		bv.Parent = hrp
+		task.spawn(function()
+			while ragdollEnabled do
+				task.wait()
+				local ch = LocalPlayer.Character
+				if not ch then break end
+				local root = ch:FindFirstChild("HumanoidRootPart")
+				if not root then break end
+				local vel = root:FindFirstChildOfClass("BodyVelocity")
+				if not vel then break end
+				local moveDir = Vector3.new(
+					(UserInputService:IsKeyDown(Enum.KeyCode.D) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.A) and 1 or 0),
+					0,
+					(UserInputService:IsKeyDown(Enum.KeyCode.S) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.W) and 1 or 0)
+				)
+				if moveDir.Magnitude > 0 then
+					moveDir = moveDir.Unit
+					local cam = workspace.CurrentCamera
+					local forward = (cam.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+					local right = (cam.CFrame.RightVector * Vector3.new(1, 0, 1)).Unit
+					vel.Velocity = forward * -moveDir.Z * walkSpeedVal + right * moveDir.X * walkSpeedVal
+				end
+			end
+		end)
+	else
+		hrp.Anchored = false
+		for _, v in ipairs(c:GetDescendants()) do
+			if v:IsA("Motor6D") then
+				v.Enabled = true
+			end
+		end
+		local bv = hrp:FindFirstChildOfClass("BodyVelocity")
+		if bv then bv:Destroy() end
+		hum:ChangeState(Enum.HumanoidStateType.Running)
+	end
 end)
 
 -- ===================== POPULATE: WEAPONS TAB =====================

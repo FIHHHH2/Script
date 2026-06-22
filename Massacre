@@ -1539,7 +1539,7 @@ local subtitleLabel = Instance.new("TextLabel")
 subtitleLabel.Size = UDim2.new(0, 120, 1, 0)
 subtitleLabel.Position = UDim2.new(1, -170, 0, 0)
 subtitleLabel.BackgroundTransparency = 1
-subtitleLabel.Font = Enum.Font.Arimo
+subtitleLabel.Font = Enum.Font.ArimoBold
 subtitleLabel.Text = "v3 | by anomaly"
 subtitleLabel.TextColor3 = THEME.accentDim
 subtitleLabel.TextSize = 9
@@ -1702,7 +1702,7 @@ local function createToggleRow(parent, name, labelText, yOffset, defaultState, c
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.new(0.65, 0, 1, 0)
 	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.Arimo
+	label.Font = Enum.Font.ArimoBold
 	label.Text = labelText
 	label.TextColor3 = THEME.text
 	label.TextSize = 12
@@ -1758,7 +1758,7 @@ local function createSliderRow(parent, name, labelText, yOffset, defaultValue, m
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.new(0.38, 0, 1, 0)
 	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.Arimo
+	label.Font = Enum.Font.ArimoBold
 	label.Text = labelText
 	label.TextColor3 = THEME.text
 	label.TextSize = 12
@@ -1861,7 +1861,7 @@ local function createCycleRow(parent, name, labelText, yOffset, options, default
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.new(0.45, 0, 1, 0)
 	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.Arimo
+	label.Font = Enum.Font.ArimoBold
 	label.Text = labelText
 	label.TextColor3 = THEME.text
 	label.TextSize = 12
@@ -2006,7 +2006,7 @@ teleportModeSelector.Parent = itemsContainer
 local modeLabel = Instance.new("TextLabel")
 modeLabel.Size = UDim2.new(0.45, 0, 1, 0)
 modeLabel.BackgroundTransparency = 1
-modeLabel.Font = Enum.Font.Arimo
+modeLabel.Font = Enum.Font.ArimoBold
 modeLabel.Text = "Teleport Mode"
 modeLabel.TextColor3 = THEME.text
 modeLabel.TextSize = 12
@@ -3082,7 +3082,7 @@ layoutContainer.Parent = gameContainer
 local layoutLabel = Instance.new("TextLabel")
 layoutLabel.Size = UDim2.new(0.45, 0, 1, 0)
 layoutLabel.BackgroundTransparency = 1
-layoutLabel.Font = Enum.Font.Arimo
+layoutLabel.Font = Enum.Font.ArimoBold
 layoutLabel.Text = "Layout"
 layoutLabel.TextColor3 = THEME.text
 layoutLabel.TextSize = 12
@@ -3155,7 +3155,7 @@ bgColorContainer.Parent = gameContainer
 local bgColorLabel = Instance.new("TextLabel")
 bgColorLabel.Size = UDim2.new(0.45, 0, 1, 0)
 bgColorLabel.BackgroundTransparency = 1
-bgColorLabel.Font = Enum.Font.Arimo
+bgColorLabel.Font = Enum.Font.ArimoBold
 bgColorLabel.Text = "Custom BG"
 bgColorLabel.TextColor3 = THEME.text
 bgColorLabel.TextSize = 12
@@ -3354,20 +3354,23 @@ bgNext.MouseButton1Click:Connect(function()
 	applyBgColor(p.color)
 end)
 
-local bgTValue = 0
-local bgTBase = {}
-local bgTElements = {}
-local function collectBgElements()
-	bgTElements = {}
-	bgTBase = {}
+local bgTValue = 0.9
+local bgTArgs = {}
+local function collectBgArgs()
+	bgTArgs = {}
+	if not screenGui then return end
+	local function shouldSkip(c)
+		if c:IsA("TextButton") or c:IsA("ImageButton") then return true end
+		if c:IsA("Frame") and c.Name == "Knob" then return true end
+		local parent = c.Parent
+		if parent and parent:IsA("ImageButton") then return true end
+		return false
+	end
 	local function scan(inst)
 		for _, c in ipairs(inst:GetChildren()) do
-			if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("ImageButton") or c:IsA("ScrollingFrame") then
-				local bg = c.BackgroundTransparency
-				if bg < 0.99 and c ~= contentFrame then
-					table.insert(bgTElements, c)
-					bgTBase[c] = bg
-				end
+			if shouldSkip(c) then continue end
+			if c:IsA("Frame") or c:IsA("ScrollingFrame") or c:IsA("TextLabel") then
+				table.insert(bgTArgs, {obj = c, bg = c.BackgroundTransparency})
 			end
 			scan(c)
 		end
@@ -3377,17 +3380,25 @@ end
 
 local function applyBgTransparency(val)
 	bgTValue = val
-	if #bgTElements == 0 then collectBgElements() end
-	for _, el in ipairs(bgTElements) do
+	if #bgTArgs == 0 then collectBgArgs() end
+	for _, entry in ipairs(bgTArgs) do
+		local el = entry.obj
 		if el and el.Parent then
-			local base = bgTBase[el] or 0
-			el.BackgroundTransparency = base + (1 - base) * val
+			local base = entry.bg
+			if base >= 1 then
+				el.BackgroundTransparency = 1
+			else
+				el.BackgroundTransparency = base + (1 - base) * val
+			end
 		end
 	end
 end
 task.spawn(function()
 	task.wait(0.3)
-	collectBgElements()
+	collectBgArgs()
+	if bgTValue > 0 then
+		applyBgTransparency(bgTValue)
+	end
 end)
 
 createSliderRow(gameContainer, "BgTransparency", "BG Transparency", 298, 0.9, 0, 0.95, 0.05, "%.2f", function(val)
@@ -3400,7 +3411,7 @@ footer.Size = UDim2.new(1, 0, 0, 18)
 footer.Position = UDim2.new(0, 0, 1, -18)
 footer.BackgroundColor3 = THEME.bgSecondary
 footer.BorderSizePixel = 0
-footer.Font = Enum.Font.Arimo
+footer.Font = Enum.Font.ArimoBold
 footer.Text = "🖱️ RMB to aim  |  ] menu  |  F2 bhop  |  Drag ✓"
 footer.TextColor3 = THEME.textDim
 footer.TextSize = 8

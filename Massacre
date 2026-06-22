@@ -2043,9 +2043,69 @@ createSliderRow(itemsContainer, "PushItemDelay", "Item Delay", 294, 0.12, 0.05, 
 	pushItemDelay = val
 end)
 
+-- ===================== AUDIO CONFIG =====================
+local audioHeader = Instance.new("TextLabel")
+audioHeader.Size = UDim2.new(0.92, 0, 0, 24)
+audioHeader.Position = UDim2.new(0.04, 0, 0, 338)
+audioHeader.BackgroundTransparency = 1
+audioHeader.Font = Enum.Font.GothamBlack
+audioHeader.Text = "🔊 AUDIO"
+audioHeader.TextColor3 = THEME.accent
+audioHeader.TextSize = 11
+audioHeader.TextXAlignment = Enum.TextXAlignment.Left
+audioHeader.Parent = itemsContainer
+
+local savedVoiceVol = nil
+createSliderRow(itemsContainer, "AudioVolume", "Volume", 366, 0.5, 0.0, 2.0, 0.05, "%.2fx", function(val)
+	pcall(function()
+		local gs = UserSettings():GetService("UserGameSettings")
+		if savedVoiceVol == nil then
+			savedVoiceVol = gs.VoiceVolume
+		end
+		gs.MasterVolume = val
+		gs.VoiceVolume = savedVoiceVol
+	end)
+end)
+
+-- ===================== CAMERA CONFIG =====================
+local camHeader = Instance.new("TextLabel")
+camHeader.Size = UDim2.new(0.92, 0, 0, 24)
+camHeader.Position = UDim2.new(0.04, 0, 0, 394)
+camHeader.BackgroundTransparency = 1
+camHeader.Font = Enum.Font.GothamBlack
+camHeader.Text = "📷 CAMERA"
+camHeader.TextColor3 = THEME.accent
+camHeader.TextSize = 11
+camHeader.TextXAlignment = Enum.TextXAlignment.Left
+camHeader.Parent = itemsContainer
+
+local thirdPersonEnabled = false
+createToggleRow(itemsContainer, "ThirdPerson", "3rd Person", 422, false, function(state)
+	thirdPersonEnabled = state
+	if state then
+		workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+		workspace.CurrentCamera.CameraMinZoomDistance = 0.5
+		workspace.CurrentCamera.CameraMaxZoomDistance = zoomDistance
+	else
+		workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+		workspace.CurrentCamera.CameraMinZoomDistance = 0.5
+		workspace.CurrentCamera.CameraMaxZoomDistance = 10
+	end
+end)
+
+local zoomDistance = 100
+createSliderRow(itemsContainer, "MaxZoom", "Max Zoom", 466, 100, 10, 500, 10, "%d", function(val)
+	zoomDistance = val
+	if thirdPersonEnabled then
+		pcall(function()
+			LocalPlayer.CameraMaxZoomDistance = val
+		end)
+	end
+end)
+
 -- Individual item buttons
 local allTools = getAllTools()
-local yPos = 338
+local yPos = 510
 
 for i, tool in ipairs(allTools) do
 	local itemBtn = Instance.new("TextButton")
@@ -2112,7 +2172,7 @@ refreshBtn.MouseButton1Click:Connect(function()
 		end
 	end
 	local newTools = getAllTools()
-	local newY = 220
+	local newY = 510
 	for _, tool in ipairs(newTools) do
 		local ib = Instance.new("TextButton")
 		ib.Name = "Item_" .. tool.Name

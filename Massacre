@@ -2080,24 +2080,24 @@ camHeader.TextXAlignment = Enum.TextXAlignment.Left
 camHeader.Parent = itemsContainer
 
 local thirdPersonEnabled = false
+local zoomDistance = 100
 createToggleRow(itemsContainer, "ThirdPerson", "3rd Person", 422, false, function(state)
 	thirdPersonEnabled = state
-	if state then
-		workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
-		workspace.CurrentCamera.CameraMinZoomDistance = 0.5
-		workspace.CurrentCamera.CameraMaxZoomDistance = zoomDistance
-	else
-		workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
-		workspace.CurrentCamera.CameraMinZoomDistance = 0.5
-		workspace.CurrentCamera.CameraMaxZoomDistance = 10
-	end
 end)
 
-local zoomDistance = 100
 createSliderRow(itemsContainer, "MaxZoom", "Max Zoom", 466, 100, 10, 500, 10, "%d", function(val)
 	zoomDistance = val
-	if thirdPersonEnabled then
-		workspace.CurrentCamera.CameraMaxZoomDistance = val
+end)
+
+task.spawn(function()
+	while task.wait(1) do
+		if thirdPersonEnabled then
+			pcall(function()
+				LocalPlayer.CameraMode = Enum.CameraMode.Classic
+				LocalPlayer.CameraMaxZoomDistance = zoomDistance
+				LocalPlayer.CameraMinZoomDistance = 0.5
+			end)
+		end
 	end
 end)
 

@@ -37,7 +37,7 @@ local function fetchPD()
 end
 local pdc=GPR and GPR:FindFirstChild("PlayerDataChanged")
 if pdc then ac(pdc.OnClientEvent:Connect(function(d) playerData=d or {}
-	if d and d[LP.Name] then currentRole=d[LP.Name].Role or "Innocent" end end)) end
+		if d and d[LP.Name] then currentRole=d[LP.Name].Role or "Innocent" end end)) end
 fetchPD()
 spawn(function() while wait(5) do fetchPD() end end)
 
@@ -402,15 +402,15 @@ addSlider(tabConts[4],"FOV Value",30,120,fovVal,function(v) fovVal=v end,"")
 addSec(tabConts[4],"Teleport")
 for _,p in Players:GetPlayers() do
 	if p~=LP then addBtn(tabConts[4],"TP to "..p.Name,function()
-		local r=getRoot(p); local mr=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-		if r and mr then mr.CFrame=r.CFrame+Vector3.new(0,3,0) end
-	end) end
+			local r=getRoot(p); local mr=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+			if r and mr then mr.CFrame=r.CFrame+Vector3.new(0,3,0) end
+		end) end
 end
 Players.PlayerAdded:Connect(function(p)
 	if p~=LP then addBtn(tabConts[4],"TP to "..p.Name,function()
-		local r=getRoot(p); local mr=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-		if r and mr then mr.CFrame=r.CFrame+Vector3.new(0,3,0) end
-	end) end
+			local r=getRoot(p); local mr=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+			if r and mr then mr.CFrame=r.CFrame+Vector3.new(0,3,0) end
+		end) end
 end)
 
 -- TAB 5: WORLD
@@ -685,6 +685,27 @@ ac(RSv.RenderStepped:Connect(function()
 			end
 		end
 	end
+	-- Silent aim (redirects mouse to nearest target when holding gun)
+	if silAim and currentRole=="Sheriff" then
+		local silTool=c:FindFirstChild("Gun")
+		if silTool then
+			local mouse=LP:GetMouse()
+			local sn=getNearestOnScreen(silFOV)
+			if sn then
+				local sr=getRoot(sn)
+				if sr then
+					local stp=sr.Position+Vector3.new(0,2,0)
+					if sn.Character and sn.Character:FindFirstChild("Head") then stp=sn.Character.Head.Position end
+					local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Blacklist; params.FilterDescendantsInstances={LP.Character,sn.Character}
+					local sdir=(stp-CAM.CFrame.Position).Unit; local sdist=(stp-CAM.CFrame.Position).Magnitude
+					local shit=workspace:Raycast(CAM.CFrame.Position,sdir*sdist,params)
+					if not shit then
+						mouse.Hit=CFrame.new(CAM.CFrame.Position,stp)
+					end
+				end
+			end
+		end
+	end
 	updateFOVCircle()
 end))
 
@@ -809,45 +830,53 @@ local function updateWepESP()
 	end
 	for _,o in pairs(wepO) do if o and o.bg then o.bg.Enabled=false end end
 	local seen={}
+	local function isHeldByPlayer(tool)
+		local p=tool.Parent
+		while p do
+			if p:IsA("Model") and p:FindFirstChildOfClass("Humanoid") then return true end
+			if p==workspace then return false end
+			p=p.Parent
+		end
+		return false
+	end
 	for _,v in workspace:GetDescendants() do
-		if v:IsA("Tool") and v.Parent==workspace then
+		if v:IsA("Tool") and not isHeldByPlayer(v) then
 			local handle=v:FindFirstChild("Handle") or v:FindFirstChildOfClass("Part") or v:FindFirstChildOfClass("MeshPart")
 			if handle then
 				local id=v:GetDebugId()
 				local isGun=v.Name:lower():find("gun") and true or false
 				if not isGun and not v.Name:lower():find("knife") then isGun=true end
 				seen[id]=true
-					if not wepTracked[id] then
-						wepTracked[id]=true
-						local bg=Instance.new("BillboardGui"); bg.Size=UDim2.new(0,160,0,40); bg.StudsOffset=Vector3.new(0,2.5,0)
-						bg.AlwaysOnTop=true; bg.Adornee=handle; bg.Parent=wepF
-						local nl=Instance.new("TextLabel"); nl.Size=UDim2.new(1,0,0,20); nl.BackgroundTransparency=0.4; nl.BackgroundColor3=Color3.new(0,0,0)
-						nl.TextColor3=isGun and Color3.fromRGB(50,150,255) or Color3.fromRGB(255,50,50)
-						nl.Text=isGun and "SHERIFF GUN" or "KNIFE"
-						nl.Font=Enum.Font.ArimoBold; nl.TextSize=14; nl.TextStrokeTransparency=0; nl.Parent=bg
-						local dl=Instance.new("TextLabel"); dl.Size=UDim2.new(1,0,0,16); dl.Position=UDim2.new(0,0,0,20)
-						dl.BackgroundTransparency=0.4; dl.BackgroundColor3=Color3.new(0,0,0); dl.TextColor3=Color3.fromRGB(200,200,200); dl.Text=""
-						dl.Font=Enum.Font.ArimoBold; dl.TextSize=11; dl.TextStrokeTransparency=0; dl.Parent=bg
-						wepO[id]={bg=bg,nl=nl,dl=dl,handle=handle,isGun=isGun}
-					else
-						local o=wepO[id]
-						if o then
-							o.bg.Enabled=true; o.bg.Adornee=handle
-							local mp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-							local dist=mp and (mp.Position-handle.Position).Magnitude or 0
-							o.dl.Text=math.floor(dist).." studs"
-						end
+				if not wepTracked[id] then
+					wepTracked[id]=true
+					local bg=Instance.new("BillboardGui"); bg.Size=UDim2.new(0,160,0,40); bg.StudsOffset=Vector3.new(0,2.5,0)
+					bg.AlwaysOnTop=true; bg.Adornee=handle; bg.Parent=wepF
+					local nl=Instance.new("TextLabel"); nl.Size=UDim2.new(1,0,0,20); nl.BackgroundTransparency=0.4; nl.BackgroundColor3=Color3.new(0,0,0)
+					nl.TextColor3=isGun and Color3.fromRGB(50,150,255) or Color3.fromRGB(255,50,50)
+					nl.Text=isGun and "SHERIFF GUN" or "KNIFE"
+					nl.Font=Enum.Font.ArimoBold; nl.TextSize=14; nl.TextStrokeTransparency=0; nl.Parent=bg
+					local dl=Instance.new("TextLabel"); dl.Size=UDim2.new(1,0,0,16); dl.Position=UDim2.new(0,0,0,20)
+					dl.BackgroundTransparency=0.4; dl.BackgroundColor3=Color3.new(0,0,0); dl.TextColor3=Color3.fromRGB(200,200,200); dl.Text=""
+					dl.Font=Enum.Font.ArimoBold; dl.TextSize=11; dl.TextStrokeTransparency=0; dl.Parent=bg
+					wepO[id]={bg=bg,nl=nl,dl=dl,handle=handle,isGun=isGun}
+				else
+					local o=wepO[id]
+					if o then
+						o.bg.Enabled=true; o.bg.Adornee=handle
+						local mp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+						local dist=mp and (mp.Position-handle.Position).Magnitude or 0
+						o.dl.Text=math.floor(dist).." studs"
 					end
 				end
 			end
 		end
 	end
-	for id,o in pairs(wepO) do
-		if not seen[id] then
-			wepTracked[id]=nil
-			if o.bg then pcall(function() o.bg:Destroy() end) end
-			wepO[id]=nil
-		end
+end
+for id,o in pairs(wepO) do
+	if not seen[id] then
+		wepTracked[id]=nil
+		if o.bg then pcall(function() o.bg:Destroy() end) end
+		wepO[id]=nil
 	end
 end
 
@@ -886,6 +915,20 @@ local function updateCoinESP()
 	end
 end
 
+-- Real-time weapon detection
+ac(workspace.DescendantAdded:Connect(function(v)
+	if v:IsA("Tool") then
+		local function checkParent()
+			local p=v.Parent
+			while p do
+				if p:IsA("Model") and p:FindFirstChildOfClass("Humanoid") then return end
+				if p==workspace then pcall(updateWepESP); return end
+				p=p.Parent
+			end
+		end
+		checkParent()
+	end
+end))
 spawn(function()
 	while wait(0.3) do
 		pcall(updateWepESP)

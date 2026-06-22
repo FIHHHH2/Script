@@ -2097,15 +2097,30 @@ local zoomDistance = 100
 createSliderRow(itemsContainer, "MaxZoom", "Max Zoom", 466, 100, 10, 500, 10, "%d", function(val)
 	zoomDistance = val
 	if thirdPersonEnabled then
-		pcall(function()
-			LocalPlayer.CameraMaxZoomDistance = val
-		end)
+		workspace.CurrentCamera.CameraMaxZoomDistance = val
+	end
+end)
+
+createToggleRow(itemsContainer, "Fullbright", "Fullbright", 510, false, function(state)
+	local lighting = game:GetService("Lighting")
+	if state then
+		lighting.Brightness = 2
+		lighting.Ambient = Color3.new(1, 1, 1)
+		lighting.FogEnd = 1e10
+		lighting.GlobalShadows = false
+		lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+	else
+		lighting.Brightness = 1
+		lighting.Ambient = Color3.new(0, 0, 0)
+		lighting.FogEnd = 50000
+		lighting.GlobalShadows = true
+		lighting.OutdoorAmbient = Color3.new(0.7, 0.7, 0.7)
 	end
 end)
 
 -- Individual item buttons
 local allTools = getAllTools()
-local yPos = 510
+local yPos = 554
 
 for i, tool in ipairs(allTools) do
 	local itemBtn = Instance.new("TextButton")
@@ -2172,7 +2187,7 @@ refreshBtn.MouseButton1Click:Connect(function()
 		end
 	end
 	local newTools = getAllTools()
-	local newY = 510
+	local newY = 554
 	for _, tool in ipairs(newTools) do
 		local ib = Instance.new("TextButton")
 		ib.Name = "Item_" .. tool.Name

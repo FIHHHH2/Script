@@ -21,6 +21,7 @@ local jpEnabled=false local jpVal=50
 local ncEnabled=false local bhEnabled=false local fovEnabled=false local fovVal=90
 local acCoins=false local acEquip=false
 local autoKillMurderer=false
+local lastShotTime=0
 local autoGrabGun=false
 local knifeAlert=false
 local bgT=0.9 local curLay=1 local custBg=nil
@@ -140,6 +141,120 @@ local function instantKillMurderer()
 		end
 	end
 end
+local trollWalkActive = false
+local trollWalkConnection = nil
+local trollWalkTrack = nil
+local currentTrollTarget = nil
+local function stopTrollWalk()
+	trollWalkActive = false
+	if trollWalkConnection then
+		trollWalkConnection:Disconnect()
+		trollWalkConnection = nil
+	end
+	if trollWalkTrack then
+		trollWalkTrack:Stop()
+		trollWalkTrack:Destroy()
+		trollWalkTrack = nil
+	end
+	currentTrollTarget = nil
+end
+local function trollWalkOnPlayer(p)
+	local char = LP.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not (char and root and hum) then return end
+	local tChar = p.Character
+	local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+	if not tRoot then return end
+	-- Toggle off if clicking the same player again
+	if trollWalkActive and currentTrollTarget == p then
+		stopTrollWalk()
+		return
+	end
+	stopTrollWalk()
+	trollWalkActive = true
+	currentTrollTarget = p
+
+	-- Play walk animation fallback
+	local animate = char:FindFirstChild("Animate")
+	local walkTrackVal = animate and animate:FindFirstChild("walk")
+	local walkAnim = walkTrackVal and walkTrackVal:FindFirstChildOfClass("Animation")
+	if walkAnim then
+		pcall(function()
+			trollWalkTrack = hum:LoadAnimation(walkAnim)
+			trollWalkTrack.Looped = true
+			trollWalkTrack:Play()
+		end)
+	end
+	-- Teleport behind player first
+	root.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3.5)
+	-- Keep teleporting behind player with back-and-forth movement
+	trollWalkConnection = RSv.RenderStepped:Connect(function()
+		if not trollWalkActive or not p.Parent or not tRoot.Parent or not root.Parent then
+			stopTrollWalk()
+			return
+		end
+
+		-- Also stop if target player dies
+		local tHum = tChar:FindFirstChildOfClass("Humanoid")
+		if tHum and tHum.Health <= 0 then
+			stopTrollWalk()
+			return
+		end
+
+		-- Oscillate back and forth relative to the target's back (between 1.5 and 5.5 studs behind)
+		local offsetZ = 3.5 + math.sin(tick() * 10) * 2
+		root.CFrame = tRoot.CFrame * CFrame.new(0, 0, offsetZ)
+	end)
+end
+local followActive = false
+local followConnection = nil
+local followTarget = nil
+local function stopFollowPlayer()
+	followActive = false
+	if followConnection then
+		followConnection:Disconnect()
+		followConnection = nil
+	end
+	followTarget = nil
+end
+local function followPlayer(p)
+	local char = LP.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not (char and root) then return end
+	local tChar = p.Character
+	local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+	if not tRoot then return end
+	-- Toggle off if clicking the same player
+	if followActive and followTarget == p then
+		stopFollowPlayer()
+		return
+	end
+	-- Make sure Troll Walk and any prior follow loops are stopped
+	stopTrollWalk()
+	stopFollowPlayer()
+	followActive = true
+	followTarget = p
+	-- Teleport behind first
+	root.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3)
+	followConnection = RSv.RenderStepped:Connect(function()
+		if not followActive or not p.Parent or not tRoot.Parent or not root.Parent then
+			stopFollowPlayer()
+			return
+		end
+		local tHum = tChar:FindFirstChildOfClass("Humanoid")
+		if tHum and tHum.Health <= 0 then
+			stopFollowPlayer()
+			return
+		end
+		-- Stay closely on their back (3 studs behind, matching height)
+		root.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3)
+	end)
+end
+ac(LP.CharacterAdded:Connect(function()
+	stopTrollWalk()
+	stopFollowPlayer()
+end))
 -- FOV circle
 local fovGui=Instance.new("ScreenGui"); fovGui.Name="MM2FOV"; fovGui.Parent=CG; fovGui.ResetOnSpawn=false
 local fovCircle=Instance.new("ImageLabel")
@@ -171,11 +286,21 @@ local function getNearestOnScreen(f, checkMurdererOnly)
 	return n,nd
 end
 local function getSilentAimTarget()
-	if not silAim then return nil, nil end
 	local c=LP.Character; if not c then return nil, nil end
 	local hasGun=c:FindFirstChild("Gun")
 	local hasKnife=c:FindFirstChild("Knife")
 	if not (hasGun or hasKnife) then return nil, nil end
+	if autoKillMurderer and hasGun then
+		local mud = getMurderer()
+		if mud and mud.Character then
+			local r = getRoot(mud)
+			if r then
+				local head = mud.Character:FindFirstChild("Head")
+				return CFrame.new(head and head.Position or r.Position), head or r
+			end
+		end
+	end
+	if not silAim then return nil, nil end
 
 	local checkMurdererOnly=false
 	if hasGun or currentRole=="Sheriff" or currentRole=="Hero" then
@@ -521,15 +646,26 @@ local function updateTPList()
 	end
 	for _, p in ipairs(Players:GetPlayers()) do
 		if p ~= LP then
+			local row = Instance.new("Frame")
+			row.Size = UDim2.new(1, -10, 0, 32)
+			row.BackgroundTransparency = 1
+			row.Parent = tpContainer
+
+			local rowLayout = Instance.new("UIListLayout")
+			rowLayout.FillDirection = Enum.FillDirection.Horizontal
+			rowLayout.Padding = UDim.new(0, 4)
+			rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+			rowLayout.Parent = row
+
 			local b = Instance.new("TextButton")
-			b.Size = UDim2.new(1, -10, 0, 30)
+			b.Size = UDim2.new(0.4, -2, 1, 0)
 			b.BackgroundColor3 = L.accent
 			b.TextColor3 = Color3.fromRGB(255, 255, 255)
-			b.Text = "TP to " .. p.Name
+			b.Text = "TP: " .. p.Name
 			b.Font = Enum.Font.ArimoBold
-			b.TextSize = 13
+			b.TextSize = 11
 			b.BorderSizePixel = 0
-			b.Parent = tpContainer
+			b.Parent = row
 			Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
 
 			b.MouseButton1Click:Connect(function()
@@ -538,6 +674,42 @@ local function updateTPList()
 				if r and mr then
 					mr.CFrame = r.CFrame * CFrame.new(0, 3, -2)
 				end
+			end)
+			local b2 = Instance.new("TextButton")
+			b2.Size = UDim2.new(0.3, -2, 1, 0)
+
+			-- Troll Walk button state
+			local isTroll = (trollWalkActive and currentTrollTarget == p)
+			b2.BackgroundColor3 = isTroll and Color3.fromRGB(60, 200, 60) or Color3.fromRGB(200, 60, 60)
+			b2.Text = isTroll and "Trolling" or "Troll"
+			b2.TextColor3 = Color3.fromRGB(255, 255, 255)
+			b2.Font = Enum.Font.ArimoBold
+			b2.TextSize = 11
+			b2.BorderSizePixel = 0
+			b2.Parent = row
+			Instance.new("UICorner", b2).CornerRadius = UDim.new(0, 8)
+
+			b2.MouseButton1Click:Connect(function()
+				trollWalkOnPlayer(p)
+				updateTPList()
+			end)
+			local b3 = Instance.new("TextButton")
+			b3.Size = UDim2.new(0.3, -2, 1, 0)
+
+			-- Follow button state
+			local isFollow = (followActive and followTarget == p)
+			b3.BackgroundColor3 = isFollow and Color3.fromRGB(60, 200, 60) or Color3.fromRGB(80, 80, 200)
+			b3.Text = isFollow and "Following" or "Follow"
+			b3.TextColor3 = Color3.fromRGB(255, 255, 255)
+			b3.Font = Enum.Font.ArimoBold
+			b3.TextSize = 11
+			b3.BorderSizePixel = 0
+			b3.Parent = row
+			Instance.new("UICorner", b3).CornerRadius = UDim.new(0, 8)
+
+			b3.MouseButton1Click:Connect(function()
+				followPlayer(p)
+				updateTPList()
 			end)
 		end
 	end
@@ -828,12 +1000,15 @@ ac(RSv.RenderStepped:Connect(function()
 					local gun = c:FindFirstChild("Gun") or (LP.Backpack and LP.Backpack:FindFirstChild("Gun"))
 					if gun then
 						if not c:FindFirstChild("Gun") then
-							h:EquipTool(gun)
+							gun.Parent = c
 						else
 							local tp = r.Position
 							if mud.Character and mud.Character:FindFirstChild("Head") then tp = mud.Character.Head.Position end
 							CAM.CFrame = CAM.CFrame:Lerp(CFrame.new(CAM.CFrame.Position, tp), 0.3)
-							gun:Activate()
+							if tick() - lastShotTime > 0.5 then
+								lastShotTime = tick()
+								gun:Activate()
+							end
 						end
 					end
 				end

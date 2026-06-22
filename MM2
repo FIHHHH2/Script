@@ -5,12 +5,24 @@ local UIS=game:GetService("UserInputService")
 local RSv=game:GetService("RunService")
 local LP=Players.LocalPlayer
 local CAM=workspace.CurrentCamera
+local guiParent = CG
+local ok = pcall(function()
+	local t = Instance.new("Folder")
+	t.Parent = CG
+	t:Destroy()
+end)
+if not ok then
+	guiParent = LP:FindFirstChildOfClass("PlayerGui")
+end
 if _G.MM2_HookActive ~= nil then _G.MM2_HookActive = false end
 if _G.MM2C then for _,c in ipairs(_G.MM2C) do if c and typeof(c)=="RBXScriptConnection" and c.Connected then c:Disconnect() end end end
 _G.MM2C={}
 _G.MM2_HookActive = true
 local function ac(c) table.insert(_G.MM2C,c) end
-for _,n in ipairs({"MM2HackMenu","MM2ESP","MM2CoinESP","MM2WeaponESP"}) do local g=CG:FindFirstChild(n) if g then g:Destroy() end end
+for _,n in ipairs({"MM2HackMenu","MM2ESP","MM2CoinESP","MM2WeaponESP"}) do 
+	local g = guiParent and guiParent:FindFirstChild(n) 
+	if g then g:Destroy() end 
+end
 -- State
 local espEnabled=true local espShowRole=true local espShowDist=true local wepEsp=true local coinEsp=true
 local aimEnabled=false local aimFOV=150 local aimPart="Head" local aimShowFOV=true
@@ -25,6 +37,8 @@ local lastShotTime=0
 local autoGrabGun=false
 local knifeAlert=false
 local bgT=0.9 local curLay=1 local custBg=nil
+local trollSpeed=10
+local audioVolume=100
 local playerData={} local currentRole="Innocent"
 local Remotes=RS:FindFirstChild("Remotes")
 local GPR=Remotes and Remotes:FindFirstChild("Gameplay")
@@ -99,23 +113,47 @@ local function getMurderer()
 end
 local function killAll()
 	local char = LP.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	local kn = char and char:FindFirstChild("Knife") or (LP.Backpack and LP.Backpack:FindFirstChild("Knife"))
-	if not kn then return end
-	if char and not char:FindFirstChild("Knife") then
-		char:FindFirstChildOfClass("Humanoid"):EquipTool(kn)
-	end
-	local handle = kn:FindFirstChild("Handle")
-	if handle then
+	if not (root and hum and kn) then return end
+	task.spawn(function()
+		local oldCF = root.CFrame
+
+		-- Equip knife synchronously by changing parent
+		if kn.Parent ~= char then
+			kn.Parent = char
+		end
+
 		for _, p in ipairs(Players:GetPlayers()) do
 			if p ~= LP then
-				local root = getRoot(p)
-				if root and not getDead(p) then
-					firetouchinterest(handle, root, 0)
-					firetouchinterest(handle, root, 1)
+				local pRoot = getRoot(p)
+				local pChar = p.Character
+				local pHum = pChar and pChar:FindFirstChildOfClass("Humanoid")
+
+				-- Ensure they are alive and not dead
+				if pRoot and pHum and pHum.Health > 0 and not getDead(p) then
+					-- Teleport behind target
+					root.CFrame = pRoot.CFrame * CFrame.new(0, 0, 1.5)
+					task.wait(0.08)
+
+					-- Activate knife
+					kn:Activate()
+
+					-- Fire touch interests
+					local handle = kn:FindFirstChild("Handle")
+					if handle then
+						firetouchinterest(handle, pRoot, 0)
+						firetouchinterest(handle, pRoot, 1)
+					end
+					task.wait(0.05)
 				end
 			end
 		end
-	end
+
+		-- Return to original location
+		root.CFrame = oldCF
+	end)
 end
 local function instantKillMurderer()
 	local mud = getMurderer()
@@ -145,6 +183,23 @@ local trollWalkActive = false
 local trollWalkConnection = nil
 local trollWalkTrack = nil
 local currentTrollTarget = nil
+local followActive = false
+local followTarget = nil
+local followConnection = nil
+local flingActive = false
+local flingTarget = nil
+local function stopFollowPlayer()
+	followActive = false
+	if followConnection then
+		followConnection:Disconnect()
+		followConnection = nil
+	end
+	followTarget = nil
+end
+local function stopFlingPlayer()
+	flingActive = false
+	flingTarget = nil
+end
 local function stopTrollWalk()
 	trollWalkActive = false
 	if trollWalkConnection then
@@ -190,33 +245,24 @@ local function trollWalkOnPlayer(p)
 	root.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3.5)
 	-- Keep teleporting behind player with back-and-forth movement
 	trollWalkConnection = RSv.RenderStepped:Connect(function()
-		if not trollWalkActive or not p.Parent or not tRoot.Parent or not root.Parent then
+		if not trollWalkActive or not p.Parent or not root.Parent then
 			stopTrollWalk()
 			return
 		end
 
-		-- Also stop if target player dies
-		local tHum = tChar:FindFirstChildOfClass("Humanoid")
-		if tHum and tHum.Health <= 0 then
-			stopTrollWalk()
+		-- Dynamic character lookup (handles target respawning)
+		local currentTargetChar = p.Character
+		local currentTargetRoot = currentTargetChar and currentTargetChar:FindFirstChild("HumanoidRootPart")
+		local currentTargetHum = currentTargetChar and currentTargetChar:FindFirstChildOfClass("Humanoid")
+
+		-- If they are dead or respawning, wait for them to load back in
+		if not currentTargetRoot or not currentTargetHum or currentTargetHum.Health <= 0 then
 			return
 		end
 
-		-- Oscillate back and forth relative to the target's back (between 1.5 and 5.5 studs behind)
-		local offsetZ = 3.5 + math.sin(tick() * 10) * 2
-		root.CFrame = tRoot.CFrame * CFrame.new(0, 0, offsetZ)
+		local offsetZ = 3.5 + math.sin(tick() * trollSpeed) * 2
+		root.CFrame = currentTargetRoot.CFrame * CFrame.new(0, 0, offsetZ)
 	end)
-end
-local followActive = false
-local followConnection = nil
-local followTarget = nil
-local function stopFollowPlayer()
-	followActive = false
-	if followConnection then
-		followConnection:Disconnect()
-		followConnection = nil
-	end
-	followTarget = nil
 end
 local function followPlayer(p)
 	local char = LP.Character
@@ -225,38 +271,110 @@ local function followPlayer(p)
 	local tChar = p.Character
 	local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
 	if not tRoot then return end
-	-- Toggle off if clicking the same player
 	if followActive and followTarget == p then
 		stopFollowPlayer()
 		return
 	end
-	-- Make sure Troll Walk and any prior follow loops are stopped
 	stopTrollWalk()
+	stopFlingPlayer()
 	stopFollowPlayer()
 	followActive = true
 	followTarget = p
-	-- Teleport behind first
 	root.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3)
 	followConnection = RSv.RenderStepped:Connect(function()
-		if not followActive or not p.Parent or not tRoot.Parent or not root.Parent then
+		if not followActive or not p.Parent or not root.Parent then
 			stopFollowPlayer()
 			return
 		end
-		local tHum = tChar:FindFirstChildOfClass("Humanoid")
-		if tHum and tHum.Health <= 0 then
-			stopFollowPlayer()
+		local currentTargetChar = p.Character
+		local currentTargetRoot = currentTargetChar and currentTargetChar:FindFirstChild("HumanoidRootPart")
+		local currentTargetHum = currentTargetChar and currentTargetChar:FindFirstChildOfClass("Humanoid")
+		if not currentTargetRoot or not currentTargetHum or currentTargetHum.Health <= 0 then
 			return
 		end
-		-- Stay closely on their back (3 studs behind, matching height)
-		root.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3)
+		-- Disable collisions during follow to prevent physics glitches
+		local myChar = LP.Character
+		if myChar then
+			for _, part in ipairs(myChar:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.CanCollide = false
+				end
+			end
+		end
+		root.CFrame = currentTargetRoot.CFrame * CFrame.new(0, 0, 3)
+	end)
+end
+local function toggleFling(p)
+	local char = LP.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not (char and root and hum) then return end
+	if flingActive and flingTarget == p then
+		stopFlingPlayer()
+		return
+	end
+	stopTrollWalk()
+	stopFollowPlayer()
+	stopFlingPlayer()
+	flingActive = true
+	flingTarget = p
+	task.spawn(function()
+		local originalCF = root.CFrame
+		local originalVelocity = root.Velocity
+		local originalRot = root.RotVelocity
+
+		local bav = Instance.new("BodyAngularVelocity")
+		bav.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+		bav.AngularVelocity = Vector3.new(0, 99999, 0)
+		bav.Parent = root
+
+		local conn = RSv.RenderStepped:Connect(function()
+			if char then
+				for _, part in ipairs(char:GetDescendants()) do
+					if part:IsA("BasePart") then
+						-- Keep HumanoidRootPart collidable so it can transfer force
+						if part.Name == "HumanoidRootPart" then
+							part.CanCollide = true
+						else
+							part.CanCollide = false
+						end
+					end
+				end
+			end
+		end)
+		while flingActive and p.Parent and root.Parent and hum.Health > 0 do
+			local tChar = p.Character
+			local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+			local tHum = tChar and tChar:FindFirstChildOfClass("Humanoid")
+
+			if tRoot and tHum and tHum.Health > 0 then
+				root.CFrame = tRoot.CFrame * CFrame.new(0, 0, 0.1)
+				root.Velocity = Vector3.new(99999, 99999, 99999)
+				pcall(function()
+					root.AssemblyLinearVelocity = Vector3.new(99999, 99999, 99999)
+					root.AssemblyAngularVelocity = Vector3.new(0, 99999, 0)
+				end)
+			else
+				break
+			end
+			task.wait()
+		end
+
+		conn:Disconnect()
+		if bav then pcall(function() bav:Destroy() end) end
+		root.Velocity = originalVelocity
+		root.RotVelocity = originalRot
+		root.CFrame = originalCF
+		stopFlingPlayer()
 	end)
 end
 ac(LP.CharacterAdded:Connect(function()
 	stopTrollWalk()
 	stopFollowPlayer()
+	stopFlingPlayer()
 end))
 -- FOV circle
-local fovGui=Instance.new("ScreenGui"); fovGui.Name="MM2FOV"; fovGui.Parent=CG; fovGui.ResetOnSpawn=false
+local fovGui=Instance.new("ScreenGui"); fovGui.Name="MM2FOV"; fovGui.Parent=guiParent; fovGui.ResetOnSpawn=false
 local fovCircle=Instance.new("ImageLabel")
 fovCircle.Size=UDim2.new(0,300,0,300); fovCircle.Position=UDim2.new(0.5,-150,0.5,-150)
 fovCircle.BackgroundTransparency=1; fovCircle.Image="rbxassetid://2665432973"
@@ -347,7 +465,7 @@ pcall(function()
 end)
 -- UI
 local gui=Instance.new("ScreenGui")
-gui.Name="MM2HackMenu"; gui.Parent=CG; gui.ResetOnSpawn=false
+gui.Name="MM2HackMenu"; gui.Parent=guiParent; gui.ResetOnSpawn=false
 local main=Instance.new("Frame")
 main.Size=UDim2.new(0,520,0,560)
 main.Position=UDim2.new(0.5,-260,0.5,-280)
@@ -405,9 +523,9 @@ closeBtn.MouseEnter:Connect(function() closeBtn.BackgroundColor3=Color3.fromRGB(
 closeBtn.MouseLeave:Connect(function() closeBtn.BackgroundColor3=Color3.fromRGB(40,40,40); closeBtn.BackgroundTransparency=0.5 end)
 -- Left sidebar with tabs
 local sideBg=52
-local tabNames={"AIMBOT","MURDERER","SHERIFF","ESP","PLAYER","WORLD","UI"}
-local tabIcons={"\u{1F3AF}","\u{1F5E1}","\u{1F6E1}","\u{1F441}","\u{1F3C3}","\u{1F30D}","\u{2699}"}
-local tabLabels={"Aimbot","Murderer","Sheriff","ESP","Movement","World","UI"}
+local tabNames={"AIMBOT","MURDERER","SHERIFF","ESP","PLAYER","TROLLING","WORLD","UI"}
+local tabIcons={"\u{1F3AF}","\u{1F5E1}","\u{1F6E1}","\u{1F441}","\u{1F3C3}","\u{1F921}","\u{1F30D}","\u{2699}"}
+local tabLabels={"Aimbot","Murderer","Sheriff","ESP","Movement","Trolling","World","UI"}
 local tabBtns={}
 local tabConts={}
 local activeTab=1
@@ -631,11 +749,71 @@ addTog(tabConts[5],"Bunny Hop",bhEnabled,function(s) bhEnabled=s end)
 addSec(tabConts[5],"Camera")
 addTog(tabConts[5],"FOV Changer",fovEnabled,function(s) fovEnabled=s end)
 addSlider(tabConts[5],"FOV Value",30,120,fovVal,function(v) fovVal=v end,"")
-addSec(tabConts[5],"Teleport")
+-- TAB 6: TROLLING
+addSec(tabConts[6],"Self Trolls")
+local ghostMode = false
+addTog(tabConts[6],"Ghost Mode (Semi-Invisible)",ghostMode,function(s)
+	ghostMode = s
+	local char = LP.Character
+	if char then
+		for _, part in ipairs(char:GetDescendants()) do
+			if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+				part.Transparency = s and 0.5 or 0
+			end
+			if part:IsA("Decal") then
+				part.Transparency = s and 0.5 or 0
+			end
+		end
+	end
+end)
+local fakeLag = false
+addTog(tabConts[6],"Fake Lag",fakeLag,function(s)
+	fakeLag = s
+end)
+task.spawn(function()
+	while true do
+		task.wait(0.2)
+		if fakeLag then
+			local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+			if root then
+				root.Anchored = true
+				task.wait(0.15)
+				root.Anchored = false
+			end
+		end
+	end
+end)
+local chatSpammer = false
+local chatMessages = {
+	"I'm right behind you!",
+	"Apex Research Labs approved this hack.",
+	"You spin me right round, baby, right round...",
+	"Troll walk active!",
+	"Who is the murderer?",
+	"Did you see that?"
+}
+addTog(tabConts[6],"Chat Spammer",chatSpammer,function(s)
+	chatSpammer = s
+end)
+task.spawn(function()
+	while true do
+		task.wait(3.5)
+		if chatSpammer then
+			local ReplicatedStorage = game:GetService("ReplicatedStorage")
+			local DefaultChatSystemChatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+			local SayMessageRequest = DefaultChatSystemChatEvents and DefaultChatSystemChatEvents:FindFirstChild("SayMessageRequest")
+			if SayMessageRequest then
+				SayMessageRequest:FireServer(chatMessages[math.random(1, #chatMessages)], "All")
+			end
+		end
+	end
+end)
+addSlider(tabConts[6],"Troll Speed",1,30,trollSpeed,function(v) trollSpeed=v end,"")
+addSec(tabConts[6],"Target Player Trolls")
 local tpContainer = Instance.new("Frame")
 tpContainer.Size = UDim2.new(1, 0, 0, 0)
 tpContainer.BackgroundTransparency = 1
-tpContainer.Parent = tabConts[5]
+tpContainer.Parent = tabConts[6]
 local tpLayout = Instance.new("UIListLayout")
 tpLayout.Padding = UDim.new(0, 3)
 tpLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -658,15 +836,15 @@ local function updateTPList()
 			rowLayout.Parent = row
 
 			local b = Instance.new("TextButton")
-			b.Size = UDim2.new(0.4, -2, 1, 0)
+			b.Size = UDim2.new(0.25, -3, 1, 0)
 			b.BackgroundColor3 = L.accent
 			b.TextColor3 = Color3.fromRGB(255, 255, 255)
-			b.Text = "TP: " .. p.Name
+			b.Text = "TP: " .. string.sub(p.Name, 1, 8)
 			b.Font = Enum.Font.ArimoBold
-			b.TextSize = 11
+			b.TextSize = 10
 			b.BorderSizePixel = 0
 			b.Parent = row
-			Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+			Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
 
 			b.MouseButton1Click:Connect(function()
 				local r = getRoot(p)
@@ -676,60 +854,72 @@ local function updateTPList()
 				end
 			end)
 			local b2 = Instance.new("TextButton")
-			b2.Size = UDim2.new(0.3, -2, 1, 0)
-
-			-- Troll Walk button state
+			b2.Size = UDim2.new(0.25, -3, 1, 0)
 			local isTroll = (trollWalkActive and currentTrollTarget == p)
 			b2.BackgroundColor3 = isTroll and Color3.fromRGB(60, 200, 60) or Color3.fromRGB(200, 60, 60)
 			b2.Text = isTroll and "Trolling" or "Troll"
 			b2.TextColor3 = Color3.fromRGB(255, 255, 255)
 			b2.Font = Enum.Font.ArimoBold
-			b2.TextSize = 11
+			b2.TextSize = 10
 			b2.BorderSizePixel = 0
 			b2.Parent = row
-			Instance.new("UICorner", b2).CornerRadius = UDim.new(0, 8)
+			Instance.new("UICorner", b2).CornerRadius = UDim.new(0, 6)
 
 			b2.MouseButton1Click:Connect(function()
 				trollWalkOnPlayer(p)
 				updateTPList()
 			end)
 			local b3 = Instance.new("TextButton")
-			b3.Size = UDim2.new(0.3, -2, 1, 0)
-
-			-- Follow button state
+			b3.Size = UDim2.new(0.25, -3, 1, 0)
 			local isFollow = (followActive and followTarget == p)
 			b3.BackgroundColor3 = isFollow and Color3.fromRGB(60, 200, 60) or Color3.fromRGB(80, 80, 200)
 			b3.Text = isFollow and "Following" or "Follow"
 			b3.TextColor3 = Color3.fromRGB(255, 255, 255)
 			b3.Font = Enum.Font.ArimoBold
-			b3.TextSize = 11
+			b3.TextSize = 10
 			b3.BorderSizePixel = 0
 			b3.Parent = row
-			Instance.new("UICorner", b3).CornerRadius = UDim.new(0, 8)
+			Instance.new("UICorner", b3).CornerRadius = UDim.new(0, 6)
 
 			b3.MouseButton1Click:Connect(function()
 				followPlayer(p)
+				updateTPList()
+			end)
+			local b4 = Instance.new("TextButton")
+			b4.Size = UDim2.new(0.25, -3, 1, 0)
+			local isFling = (flingActive and flingTarget == p)
+			b4.BackgroundColor3 = isFling and Color3.fromRGB(60, 200, 60) or Color3.fromRGB(120, 40, 180)
+			b4.Text = isFling and "Flinging" or "Fling"
+			b4.TextColor3 = Color3.fromRGB(255, 255, 255)
+			b4.Font = Enum.Font.ArimoBold
+			b4.TextSize = 10
+			b4.BorderSizePixel = 0
+			b4.Parent = row
+			Instance.new("UICorner", b4).CornerRadius = UDim.new(0, 6)
+
+			b4.MouseButton1Click:Connect(function()
+				toggleFling(p)
 				updateTPList()
 			end)
 		end
 	end
 	task.defer(function()
 		tpContainer.Size = UDim2.new(1, 0, 0, tpLayout.AbsoluteContentSize.Y)
-		tabConts[5].CanvasSize = UDim2.new(0, 0, 0, tabConts[5].UIListLayout.AbsoluteContentSize.Y + 20)
+		tabConts[6].CanvasSize = UDim2.new(0, 0, 0, tabConts[6].UIListLayout.AbsoluteContentSize.Y + 20)
 	end)
 end
 ac(Players.PlayerAdded:Connect(updateTPList))
 ac(Players.PlayerRemoving:Connect(updateTPList))
 updateTPList()
--- TAB 6: WORLD
-addSec(tabConts[6],"Auto")
-addTog(tabConts[6],"Auto Collect Coins",acCoins,function(s) acCoins=s end)
-addTog(tabConts[6],"Auto Equip Weapon",acEquip,function(s) acEquip=s end)
-addSec(tabConts[6],"Player Info")
+-- TAB 7: WORLD
+addSec(tabConts[7],"Auto")
+addTog(tabConts[7],"Auto Collect Coins",acCoins,function(s) acCoins=s end)
+addTog(tabConts[7],"Auto Equip Weapon",acEquip,function(s) acEquip=s end)
+addSec(tabConts[7],"Player Info")
 local infoL=Instance.new("TextLabel")
 infoL.Size=UDim2.new(1,-10,0,40); infoL.BackgroundTransparency=0.7; infoL.BackgroundColor3=Color3.new(0,0,0)
 infoL.TextColor3=L.text; infoL.Text="Role: "..currentRole; infoL.Font=Enum.Font.ArimoBold
-infoL.TextSize=12; infoL.TextXAlignment=Enum.TextXAlignment.Left; infoL.Parent=tabConts[6]
+infoL.TextSize=12; infoL.TextXAlignment=Enum.TextXAlignment.Left; infoL.Parent=tabConts[7]
 spawn(function() while wait(1) do infoL.Text="Your Role: "..currentRole.." | Players: "..#Players:GetPlayers() end end)
 -- Layout system
 local layouts={
@@ -802,15 +992,36 @@ local custBGs={
 	{"Navy",Color3.fromRGB(10,15,35)},{"Dark Red",Color3.fromRGB(30,5,5)},{"Dark Green",Color3.fromRGB(5,20,5)},
 	{"Dark Purple",Color3.fromRGB(20,5,30)},{"Dark Brown",Color3.fromRGB(30,20,10)},
 }
--- TAB 7: UI
-addSec(tabConts[7],"Window")
-addBtn(tabConts[7],"Reset Position",function()
+-- TAB 8: UI
+addSec(tabConts[8],"Window")
+addBtn(tabConts[8],"Reset Position",function()
 	main.Position=UDim2.new(0.5,-240,0.5,-280)
 end)
-addTog(tabConts[7],"Toggle GUI (])",true,function(s) gui.Enabled=s end)
-addSec(tabConts[7],"Layout Themes")
+addTog(tabConts[8],"Toggle GUI (])",true,function(s) gui.Enabled=s end)
+local function updateVolume(val)
+	audioVolume = val
+	for _, sound in ipairs(game:GetDescendants()) do
+		if sound:IsA("Sound") then
+			if not sound:GetAttribute("OriginalVolume") then
+				sound:SetAttribute("OriginalVolume", sound.Volume)
+			end
+			sound.Volume = sound:GetAttribute("OriginalVolume") * (val / 100)
+		end
+	end
+end
+ac(game.DescendantAdded:Connect(function(v)
+	if v:IsA("Sound") then
+		task.wait()
+		if not v:GetAttribute("OriginalVolume") then
+			v:SetAttribute("OriginalVolume", v.Volume)
+		end
+		v.Volume = v:GetAttribute("OriginalVolume") * (audioVolume / 100)
+	end
+end))
+addSlider(tabConts[8],"Audio Volume",0,100,audioVolume,updateVolume,"%")
+addSec(tabConts[8],"Layout Themes")
 local function makeLayRow()
-	local r=Instance.new("Frame"); r.Size=UDim2.new(1,-10,0,28); r.BackgroundTransparency=1; r.Parent=tabConts[7]
+	local r=Instance.new("Frame"); r.Size=UDim2.new(1,-10,0,28); r.BackgroundTransparency=1; r.Parent=tabConts[8]
 	local lay=Instance.new("UIListLayout"); lay.FillDirection=Enum.FillDirection.Horizontal; lay.Padding=UDim.new(0,6); lay.SortOrder=Enum.SortOrder.LayoutOrder; lay.Parent=r
 	return r
 end
@@ -831,8 +1042,8 @@ for ri=1,math.ceil(#layouts/4) do
 	end
 end
 applyLayout(1)
-addSec(tabConts[7],"Custom BG Color")
-local bgRow=Instance.new("Frame"); bgRow.Size=UDim2.new(1,-10,0,26); bgRow.BackgroundTransparency=1; bgRow.Parent=tabConts[7]
+addSec(tabConts[8],"Custom BG Color")
+local bgRow=Instance.new("Frame"); bgRow.Size=UDim2.new(1,-10,0,26); bgRow.BackgroundTransparency=1; bgRow.Parent=tabConts[8]
 local bgLay=Instance.new("UIListLayout"); bgLay.FillDirection=Enum.FillDirection.Horizontal; bgLay.Padding=UDim.new(0,4); bgLay.Wraps=true; bgLay.SortOrder=Enum.SortOrder.LayoutOrder; bgLay.Parent=bgRow
 for _,c in ipairs(custBGs) do
 	local b=Instance.new("TextButton")
@@ -847,8 +1058,8 @@ rndBg.TextColor3=Color3.fromRGB(150,150,150); rndBg.Text="RND"; rndBg.Font=Enum.
 rndBg.MouseButton1Click:Connect(function()
 	local l=layouts[curLayIdx]; l.bg=Color3.fromRGB(math.random(0,255),math.random(0,255),math.random(0,255)); applyLayout(curLayIdx)
 end)
-addSec(tabConts[7],"Accent Color")
-local accRow=Instance.new("Frame"); accRow.Size=UDim2.new(1,-10,0,26); accRow.BackgroundTransparency=1; accRow.Parent=tabConts[7]
+addSec(tabConts[8],"Accent Color")
+local accRow=Instance.new("Frame"); accRow.Size=UDim2.new(1,-10,0,26); accRow.BackgroundTransparency=1; accRow.Parent=tabConts[8]
 local accLay=Instance.new("UIListLayout"); accLay.FillDirection=Enum.FillDirection.Horizontal; accLay.Padding=UDim.new(0,4); accLay.Wraps=true; accLay.SortOrder=Enum.SortOrder.LayoutOrder; accLay.Parent=accRow
 local accColors={
 	{"Gray",Color3.fromRGB(80,80,80)},{"Cyan",Color3.fromRGB(0,200,255)},{"Green",Color3.fromRGB(0,200,0)},
@@ -1080,112 +1291,246 @@ ac(UIS.InputBegan:Connect(function(i,gp)
 	if i.KeyCode==Enum.KeyCode.RightBracket then gui.Enabled=not gui.Enabled; if toggles["Toggle GUI (])"] then toggles["Toggle GUI (])"](gui.Enabled) end end
 	if i.KeyCode==Enum.KeyCode.Equals then espEnabled=not espEnabled; if toggles["ESP Enabled"] then toggles["ESP Enabled"](espEnabled) end end
 end))
--- ESP
-local espF=Instance.new("Folder"); espF.Name="MM2ESP"; espF.Parent=CG
-local espO={}
+-- ESP ScreenGui Containers
+local espGui = Instance.new("ScreenGui")
+espGui.Name = "MM2_ESP_ROUTINE"
+espGui.Parent = guiParent
+espGui.ResetOnSpawn = false
+local espDrawings = {}
+local function clearDrawingsFor(key)
+	if espDrawings[key] then
+		local d = espDrawings[key]
+		pcall(function() if d.billboard then d.billboard:Destroy() end end)
+		espDrawings[key] = nil
+	end
+end
 local function updateESP()
 	if not espEnabled then
-		for _,o in pairs(espO) do if o and o.bg then o.bg.Enabled=false end end
+		for k, _ in pairs(espDrawings) do
+			if typeof(k) == "Instance" and k:IsA("Player") then
+				clearDrawingsFor(k)
+			end
+		end
 		return
 	end
-	local myPos=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-	for _,p in ipairs(Players:GetPlayers()) do
+
+	for _, p in ipairs(Players:GetPlayers()) do
 		if p ~= LP then
 			local char = p.Character
 			local root = char and char:FindFirstChild("HumanoidRootPart")
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
+
 			if root and hum and hum.Health > 0 then
-				local o = espO[p]
-				if not o or not o.bg or o.bg.Parent == nil then
-					if o and o.bg then pcall(function() o.bg:Destroy() end) end
-					local bg=Instance.new("BillboardGui"); bg.Name=p.Name; bg.Size=UDim2.new(0,200,0,60); bg.StudsOffset=Vector3.new(0,3,0)
-					bg.AlwaysOnTop=true; bg.Adornee=root; bg.Parent=espF
-					local nl=Instance.new("TextLabel"); nl.Size=UDim2.new(1,0,0,18); nl.BackgroundTransparency=0.3; nl.BackgroundColor3=Color3.new(0,0,0)
-					nl.TextColor3=Color3.new(1,1,1); nl.Text=p.Name; nl.Font=Enum.Font.ArimoBold; nl.TextSize=14; nl.TextStrokeTransparency=0; nl.Parent=bg
-					local rl=Instance.new("TextLabel"); rl.Size=UDim2.new(1,0,0,16); rl.Position=UDim2.new(0,0,0,18)
-					rl.BackgroundTransparency=0.3; rl.BackgroundColor3=Color3.new(0,0,0); rl.TextColor3=Color3.new(1,1,1); rl.Text=""
-					rl.Font=Enum.Font.ArimoBold; rl.TextSize=13; rl.TextStrokeTransparency=0; rl.Parent=bg
-					local dl=Instance.new("TextLabel"); dl.Size=UDim2.new(1,0,0,16); dl.Position=UDim2.new(0,0,0,34)
-					dl.BackgroundTransparency=0.3; dl.BackgroundColor3=Color3.new(0,0,0); dl.TextColor3=Color3.new(0.8,0.8,0.8); dl.Text=""
-					dl.Font=Enum.Font.ArimoBold; dl.TextSize=12; dl.TextStrokeTransparency=0; dl.Parent=bg
-					espO[p]={bg=bg,nl=nl,rl=rl,dl=dl,plr=p}
-					o = espO[p]
+				local drawings = espDrawings[p]
+				if not drawings then
+					-- Billboard setup
+					local billboard = Instance.new("BillboardGui")
+					billboard.Name = "MM2_ESP_BILLBOARD"
+					billboard.AlwaysOnTop = true
+					billboard.Size = UDim2.new(0, 140, 0, 44)
+					billboard.StudsOffset = Vector3.new(0, 3, 0)
+					billboard.Parent = espGui
+
+					-- Premium Dark-Translucent Capsule Container
+					local container = Instance.new("Frame")
+					container.Size = UDim2.new(1, 0, 1, 0)
+					container.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+					container.BackgroundTransparency = 0.35
+					container.BorderSizePixel = 0
+					container.Parent = billboard
+
+					local corner = Instance.new("UICorner")
+					corner.CornerRadius = UDim.new(0, 6)
+					corner.Parent = container
+
+					local stroke = Instance.new("UIStroke")
+					stroke.Thickness = 1
+					stroke.Transparency = 0.4
+					stroke.Parent = container
+
+					local list = Instance.new("UIListLayout")
+					list.SortOrder = Enum.SortOrder.LayoutOrder
+					list.Padding = UDim.new(0, 3)
+					list.HorizontalAlignment = Enum.HorizontalAlignment.Center
+					list.VerticalAlignment = Enum.VerticalAlignment.Center
+					list.Parent = container
+
+					-- Header row (Name and Distance)
+					local header = Instance.new("Frame")
+					header.Size = UDim2.new(1, 0, 0, 15)
+					header.BackgroundTransparency = 1
+					header.Parent = container
+
+					local hList = Instance.new("UIListLayout")
+					hList.FillDirection = Enum.FillDirection.Horizontal
+					hList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+					hList.VerticalAlignment = Enum.VerticalAlignment.Center
+					hList.Padding = UDim.new(0, 4)
+					hList.Parent = header
+
+					local nameLabel = Instance.new("TextLabel")
+					nameLabel.AutomaticSize = Enum.AutomaticSize.X
+					nameLabel.Size = UDim2.new(0, 0, 1, 0)
+					nameLabel.BackgroundTransparency = 1
+					nameLabel.Font = Enum.Font.GothamBold
+					nameLabel.TextSize = 10
+					nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+					nameLabel.Parent = header
+
+					local distLabel = Instance.new("TextLabel")
+					distLabel.AutomaticSize = Enum.AutomaticSize.X
+					distLabel.Size = UDim2.new(0, 0, 1, 0)
+					distLabel.BackgroundTransparency = 1
+					distLabel.Font = Enum.Font.Gotham
+					distLabel.TextSize = 8
+					distLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
+					distLabel.Parent = header
+
+					-- Role Badge (Mini pill container)
+					local badge = Instance.new("Frame")
+					badge.Size = UDim2.new(0, 75, 0, 14)
+					badge.Parent = container
+
+					local bCorner = Instance.new("UICorner")
+					bCorner.CornerRadius = UDim.new(1, 0)
+					bCorner.Parent = badge
+
+					local bStroke = Instance.new("UIStroke")
+					bStroke.Thickness = 1
+					bStroke.Transparency = 0.2
+					bStroke.Parent = badge
+
+					local roleLabel = Instance.new("TextLabel")
+					roleLabel.Size = UDim2.new(1, 0, 1, 0)
+					roleLabel.BackgroundTransparency = 1
+					roleLabel.Font = Enum.Font.GothamBold
+					roleLabel.TextSize = 8
+					roleLabel.Parent = badge
+
+					drawings = {
+						billboard = billboard,
+						container = container,
+						stroke = stroke,
+						nameLabel = nameLabel,
+						distLabel = distLabel,
+						badge = badge,
+						bStroke = bStroke,
+						roleLabel = roleLabel
+					}
+					espDrawings[p] = drawings
 				end
-				o.bg.Enabled=true
-				o.bg.Adornee=root
-				local role=getRole(p)
-				local dead=(playerData and playerData[p.Name] and playerData[p.Name].Dead) or false
-				local dist=myPos and (myPos.Position-root.Position).Magnitude or 0
+
+				local head = char:FindFirstChild("Head") or root
+				drawings.billboard.Adornee = head
+
+				local myChar = LP.Character
+				local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+				local dist = myRoot and (myRoot.Position - root.Position).Magnitude or 0
+				local role = getRole(p)
+				local dead = (playerData and playerData[p.Name] and playerData[p.Name].Dead) or false
+
 				local col
-				if dead then col=Color3.new(0.5,0.5,0.5); role=role.." (Dead)"
-				elseif highlVics and currentRole=="Murderer" and role~="Murderer" then col=Color3.new(1,0.4,1)
-				elseif role=="Murderer" then col=Color3.fromRGB(255,50,50)
-				elseif role=="Sheriff" then col=Color3.fromRGB(50,150,255)
-				else col=Color3.fromRGB(50,255,50) end
-				o.nl.TextColor3=col; o.nl.Text=p.Name.." ["..math.floor(dist).."m]"
-				o.rl.Text=espShowRole and role or ""; o.dl.Text=espShowDist and math.floor(dist).." studs" or ""
+				local roleStatusText = "Innocent"
+
+				if dead then 
+					col = Color3.fromRGB(150, 150, 150)
+					roleStatusText = "Dead"
+				elseif role == "Murderer" then 
+					col = Color3.fromRGB(235, 60, 60)
+					roleStatusText = "Murderer"
+				elseif role == "Sheriff" then 
+					col = Color3.fromRGB(60, 150, 235)
+					roleStatusText = "Sheriff"
+				else 
+					col = Color3.fromRGB(80, 220, 80) 
+				end
+
+				-- Apply role indicator colors to border strokes and badges
+				drawings.stroke.Color = col
+				drawings.bStroke.Color = col
+				drawings.roleLabel.TextColor3 = col
+
+				-- Populate content
+				drawings.nameLabel.Text = p.Name
+				drawings.distLabel.Text = espShowDist and (math.floor(dist) .. "m") or ""
+				drawings.distLabel.Visible = espShowDist
+
+				drawings.roleLabel.Text = string.upper(roleStatusText)
+				drawings.badge.BackgroundColor3 = col
+				drawings.badge.BackgroundTransparency = 0.85
+				drawings.badge.Visible = espShowRole
+
+				drawings.billboard.Enabled = true
 			else
-				local o = espO[p]
-				if o and o.bg then o.bg.Enabled=false end
+				clearDrawingsFor(p)
 			end
 		end
 	end
-	for p,o in pairs(espO) do
-		if not Players:FindFirstChild(p.Name) then
-			if o.bg then pcall(function() o.bg:Destroy() end) end
-			espO[p]=nil
+
+	-- Cleanup left players
+	for p, _ in pairs(espDrawings) do
+		if typeof(p) == "Instance" and p:IsA("Player") and not Players:FindFirstChild(p.Name) then
+			clearDrawingsFor(p)
 		end
 	end
 end
 ac(RSv.RenderStepped:Connect(updateESP))
--- Weapon ESP
-local wepF=Instance.new("Folder"); wepF.Name="MM2WeaponESP"; wepF.Parent=CG
-local wepO={}
-local wepTracked={}
 local function updateWepESP()
 	if not wepEsp then
-		for _,o in pairs(wepO) do if o and o.bg then o.bg.Enabled=false end end
+		for k, _ in pairs(espDrawings) do
+			if typeof(k) == "string" and string.sub(k, 1, 4) == "wep_" then
+				clearDrawingsFor(k)
+			end
+		end
 		return
 	end
-	for _,o in pairs(wepO) do if o and o.bg then o.bg.Enabled=false end end
-	local seen={}
-	-- Detect only dropped guns in workspace
+
+	local seen = {}
+	local myChar = LP.Character
+	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+
 	for _, v in ipairs(workspace:GetChildren()) do
 		if v.Name == "GunDrop" or v.Name == "DroppedGun" or (v:IsA("Tool") and v.Name == "Gun" and v.Parent == workspace) then
 			local handle = v:FindFirstChild("Handle") or v:FindFirstChildOfClass("Part") or v:FindFirstChildOfClass("MeshPart") or v
 			if handle then
-				local id = v:GetDebugId()
+				local id = "wep_" .. v:GetDebugId()
 				seen[id] = true
-				if not wepTracked[id] then
-					wepTracked[id] = true
-					local bg = Instance.new("BillboardGui"); bg.Size = UDim2.new(0, 160, 0, 40); bg.StudsOffset = Vector3.new(0, 2.5, 0)
-					bg.AlwaysOnTop = true; bg.Adornee = handle; bg.Parent = wepF
-					local nl = Instance.new("TextLabel"); nl.Size = UDim2.new(1, 0, 0, 20); nl.BackgroundTransparency = 0.4; nl.BackgroundColor3 = Color3.new(0, 0, 0)
-					nl.TextColor3 = Color3.fromRGB(50, 150, 255)
-					nl.Text = "DROPPED GUN"
-					nl.Font = Enum.Font.ArimoBold; nl.TextSize = 12; nl.TextStrokeTransparency = 0; nl.Parent = bg
-					local dl = Instance.new("TextLabel"); dl.Size = UDim2.new(1, 0, 0, 16); dl.Position = UDim2.new(0, 0, 0, 20)
-					dl.BackgroundTransparency = 0.4; dl.BackgroundColor3 = Color3.new(0, 0, 0); dl.TextColor3 = Color3.fromRGB(200, 200, 200); dl.Text = ""
-					dl.Font = Enum.Font.ArimoBold; dl.TextSize = 11; dl.TextStrokeTransparency = 0; dl.Parent = bg
-					wepO[id] = {bg = bg, nl = nl, dl = dl, handle = handle}
-				else
-					local o = wepO[id]
-					if o then
-						o.bg.Enabled = true
-						o.bg.Adornee = handle
-						local mp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-						local dist = mp and (mp.Position - handle.Position).Magnitude or 0
-						o.dl.Text = math.floor(dist) .. " studs"
-					end
+
+				local drawings = espDrawings[id]
+				if not drawings then
+					local billboard = Instance.new("BillboardGui")
+					billboard.Name = "MM2_Wep_Billboard"
+					billboard.AlwaysOnTop = true
+					billboard.Size = UDim2.new(0, 110, 0, 32)
+					billboard.StudsOffset = Vector3.new(0, 1.5, 0)
+					billboard.Parent = espGui
+
+					local label = Instance.new("TextLabel")
+					label.Size = UDim2.new(1, 0, 1, 0)
+					label.BackgroundTransparency = 1
+					label.TextColor3 = Color3.fromRGB(80, 180, 255)
+					label.Font = Enum.Font.ArimoBold
+					label.TextSize = 11
+					label.TextStrokeTransparency = 0
+					label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+					label.Parent = billboard
+
+					drawings = {billboard = billboard, label = label}
+					espDrawings[id] = drawings
 				end
+
+				drawings.billboard.Adornee = handle
+				local dist = myRoot and (myRoot.Position - handle.Position).Magnitude or 0
+				drawings.label.Text = "GUN\n[" .. math.floor(dist) .. " studs]"
+				drawings.billboard.Enabled = true
 			end
 		end
 	end
-	for id,o in pairs(wepO) do
-		if not seen[id] then
-			wepTracked[id]=nil
-			if o.bg then pcall(function() o.bg:Destroy() end) end
-			wepO[id]=nil
+
+	-- Clean inactive weapons
+	for id, _ in pairs(espDrawings) do
+		if typeof(id) == "string" and string.sub(id, 1, 4) == "wep_" and not seen[id] then
+			clearDrawingsFor(id)
 		end
 	end
 end
@@ -1221,36 +1566,54 @@ local function getActiveCoins()
 	end
 	return list
 end
--- Coin ESP
-local coinF=Instance.new("Folder"); coinF.Name="MM2CoinESP"; coinF.Parent=CG
-local coinO={}
 local function updateCoinESP()
 	if not coinEsp then
-		for _,o in pairs(coinO) do if o and o.bg then o.bg.Enabled=false end end
+		for k, _ in pairs(espDrawings) do
+			if typeof(k) == "string" and string.sub(k, 1, 5) == "coin_" then
+				clearDrawingsFor(k)
+			end
+		end
 		return
 	end
-	for _,o in pairs(coinO) do if o and o.bg then o.bg.Enabled=false end end
-	local seen={}
+
+	local seen = {}
 	local active = getActiveCoins()
-	for _,v in ipairs(active) do
-		local id=v:GetDebugId()
-		seen[id]=true
-		if not coinO[id] then
-			local bg=Instance.new("BillboardGui"); bg.Size=UDim2.new(0,80,0,24); bg.StudsOffset=Vector3.new(0,1.5,0)
-			bg.AlwaysOnTop=true; bg.Adornee=v; bg.Parent=coinF
-			local nl=Instance.new("TextLabel"); nl.Size=UDim2.new(1,0,1,0); nl.BackgroundTransparency=0.4; nl.BackgroundColor3=Color3.new(0,0,0)
-			nl.TextColor3=Color3.fromRGB(255,200,50); nl.Text="COIN"
-			nl.Font=Enum.Font.ArimoBold; nl.TextSize=11; nl.TextStrokeTransparency=0; nl.Parent=bg
-			coinO[id]={bg=bg,nl=nl}
-		else
-			local o=coinO[id]
-			if o and o.bg then o.bg.Enabled=true; o.bg.Adornee=v end
+
+	for _, v in ipairs(active) do
+		local id = "coin_" .. v:GetDebugId()
+		seen[id] = true
+
+		local drawings = espDrawings[id]
+		if not drawings then
+			local billboard = Instance.new("BillboardGui")
+			billboard.Name = "MM2_Coin_Billboard"
+			billboard.AlwaysOnTop = true
+			billboard.Size = UDim2.new(0, 60, 0, 18)
+			billboard.Parent = espGui
+
+			local label = Instance.new("TextLabel")
+			label.Size = UDim2.new(1, 0, 1, 0)
+			label.BackgroundTransparency = 1
+			label.TextColor3 = Color3.fromRGB(255, 200, 50)
+			label.Font = Enum.Font.ArimoBold
+			label.TextSize = 10
+			label.Text = "COIN"
+			label.TextStrokeTransparency = 0
+			label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+			label.Parent = billboard
+
+			drawings = {billboard = billboard, label = label}
+			espDrawings[id] = drawings
 		end
+
+		drawings.billboard.Adornee = v
+		drawings.billboard.Enabled = true
 	end
-	for id,o in pairs(coinO) do
-		if not seen[id] then
-			if o.bg then pcall(function() o.bg:Destroy() end) end
-			coinO[id]=nil
+
+	-- Clean inactive coins
+	for id, _ in pairs(espDrawings) do
+		if typeof(id) == "string" and string.sub(id, 1, 5) == "coin_" and not seen[id] then
+			clearDrawingsFor(id)
 		end
 	end
 end

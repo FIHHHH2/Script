@@ -61,7 +61,7 @@ local pdc=GPR and GPR:FindFirstChild("PlayerDataChanged")
 if pdc then ac(pdc.OnClientEvent:Connect(function(d) playerData=d or {}
 		if d and d[LP.Name] then currentRole=d[LP.Name].Role or "Innocent" end end)) end
 fetchPD()
-spawn(function() while wait(5) do fetchPD() end end)
+task.spawn(function() while wait(5) do fetchPD() end end)
 
 local roundStart = GPR and GPR:FindFirstChild("RoundStart")
 if roundStart then
@@ -204,6 +204,8 @@ local followConnection = nil
 local flingActive = false
 local flingTarget = nil
 
+
+
 local function stopFollowPlayer()
 	followActive = false
 	if followConnection then
@@ -218,6 +220,35 @@ local function stopFlingPlayer()
 	flingTarget = nil
 end
 
+local function camBehind(tr)
+	if not tr then return end
+	local lv=CAM.CFrame.LookVector
+	CAM.CFrame=CFrame.lookAt(tr.Position+Vector3.new(0,5,10),tr.Position+Vector3.new(0,5,10)+lv)
+end
+local occludedParts={}
+local function clearOccluded()
+	for p,t in pairs(occludedParts) do
+		if p and p.Parent then p.Transparency=t end
+	end
+	occludedParts={}
+end
+local function handleOcclusion(from,to)
+	local params=RaycastParams.new()
+	params.FilterType=Enum.RaycastFilterType.Blacklist
+	local filter={LP.Character,CAM}
+	params.FilterDescendantsInstances=filter
+	local result=workspace:Raycast(from,(to-from).Unit*((to-from).Magnitude),params)
+	local hit=result and result.Instance and (result.Instance:IsA("BasePart") or result.Instance:IsA("UnionOperation")) and result.Instance
+	for p,t in pairs(occludedParts) do
+		if p~=hit and p.Parent then p.Transparency=t end
+		if p~=hit then occludedParts[p]=nil end
+	end
+	if hit and not occludedParts[hit] then
+		occludedParts[hit]=hit.Transparency
+		hit.Transparency=1
+	end
+end
+
 local function stopTrollWalk()
 	trollWalkActive = false
 	if trollWalkConnection then
@@ -230,6 +261,7 @@ local function stopTrollWalk()
 		trollWalkTrack = nil
 	end
 	currentTrollTarget = nil
+	clearOccluded()
 end
 
 local function trollWalkOnPlayer(p)
@@ -287,6 +319,8 @@ local function trollWalkOnPlayer(p)
 
 		local offsetZ = 3.5 + math.sin(tick() * trollSpeed) * 2
 		root.CFrame = currentTargetRoot.CFrame * CFrame.new(0, 0, offsetZ)
+		camBehind(currentTargetRoot)
+		handleOcclusion(CAM.CFrame.Position,currentTargetRoot.Position)
 	end)
 end
 
@@ -411,11 +445,85 @@ local function toggleFling(p)
 	end)
 end
 
+do -- troll features: stalk + troll walk + orbit + teleport + scare
+local stA,stT,stC; local twA,twT; local orA,orT,orC; local tpA,tpT,tpC; local scA,scT,scC
+local function sst() stA=false; if stC then stC:Disconnect(); stC=nil end; stT=nil; clearOccluded() end
+local function stw() twA=false; twT=nil; stopTrollWalk() end
+local function sor() orA=false; if orC then orC:Disconnect(); orC=nil end; orT=nil; clearOccluded() end
+local function stp() tpA=false; if tpC then tpC:Disconnect(); tpC=nil end; tpT=nil; clearOccluded() end
+local function ssc() scA=false; if scC then scC:Disconnect(); scC=nil end; scT=nil; clearOccluded() end
+local function tst(p)
+	if stA and stT==p then sst(); return end; sst(); stA=true; stT=p
+	stC=RSv.RenderStepped:Connect(function()
+		if not stA or not p.Parent then sst(); return end
+		local mc=LP.Character; local mr=mc and mc:FindFirstChild("HumanoidRootPart")
+		local tc=p.Character; local tr=tc and tc:FindFirstChild("HumanoidRootPart")
+		if mr and tr then
+			mr.CFrame=tr.CFrame*CFrame.new(0,0,4)
+			camBehind(tr)
+			handleOcclusion(CAM.CFrame.Position,tr.Position)
+		end
+	end)
+end
+local function ttw(p)
+	if twA and twT==p then stw(); return end; stw(); twA=true; twT=p
+	stopFollowPlayer(); stopFlingPlayer()
+	trollWalkOnPlayer(p)
+end
+local function tor(p)
+	if orA and orT==p then sor(); return end; sor(); orA=true; orT=p
+	stopTrollWalk(); stopFollowPlayer(); stopFlingPlayer()
+	local char=LP.Character; local root=char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	orC=RSv.RenderStepped:Connect(function()
+		if not orA or not p.Parent then sor(); return end
+		local tc=p.Character; local tr=tc and tc:FindFirstChild("HumanoidRootPart")
+		if not tr then return end
+		local a=tick()*trollSpeed/4
+		root.CFrame=CFrame.lookAt((tr.CFrame*CFrame.new(math.cos(a)*5,0,math.sin(a)*5)).Position,tr.Position)
+		camBehind(tr)
+		handleOcclusion(CAM.CFrame.Position,tr.Position)
+	end)
+end
+local function ttp(p)
+	if tpA and tpT==p then stp(); return end; stp(); tpA=true; tpT=p
+	stopTrollWalk(); stopFollowPlayer(); stopFlingPlayer(); sst(); stw(); sor(); ssc()
+	local char=LP.Character; local root=char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	tpC=RSv.RenderStepped:Connect(function()
+		if not tpA or not p.Parent then stp(); return end
+		local tc=p.Character; local tr=tc and tc:FindFirstChild("HumanoidRootPart")
+		if not tr then return end
+		root.CFrame=tr.CFrame*CFrame.new(0,0,4)
+		camBehind(tr)
+		handleOcclusion(CAM.CFrame.Position,tr.Position)
+	end)
+end
+local function tsc(p)
+	if scA and scT==p then ssc(); return end; ssc(); scA=true; scT=p
+	stopTrollWalk(); stopFollowPlayer(); stopFlingPlayer(); sst(); stw(); sor(); stp()
+	local char=LP.Character; local root=char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	scC=RSv.RenderStepped:Connect(function()
+		if not scA or not p.Parent then ssc(); return end
+		local tc=p.Character; local tr=tc and tc:FindFirstChild("HumanoidRootPart")
+		if not tr then return end
+		root.CFrame=CFrame.lookAt((tr.CFrame*CFrame.new(0,0,-3.5)).Position,tr.Position)
+		camBehind(tr)
+		handleOcclusion(CAM.CFrame.Position,tr.Position)
+	end)
+end
+_G.trollingFeatures={
+	{key="stalk",label="Stalk",color=Color3.fromRGB(60,200,200),af=function(p)return stA and stT==p end,tf=tst},
+	{key="trollWalk",label="TrollWalk",color=Color3.fromRGB(0,200,255),af=function(p)return twA and twT==p end,tf=ttw},
+	{key="orbit",label="Orbit",color=Color3.fromRGB(255,150,0),af=function(p)return orA and orT==p end,tf=tor},
+	{key="teleport",label="Teleport",color=Color3.fromRGB(200,200,0),af=function(p)return tpA and tpT==p end,tf=ttp},
+	{key="scare",label="Scare",color=Color3.fromRGB(255,60,60),af=function(p)return scA and scT==p end,tf=tsc},
+}
 ac(LP.CharacterAdded:Connect(function()
-	stopTrollWalk()
-	stopFollowPlayer()
-	stopFlingPlayer()
+	stopTrollWalk(); stopFollowPlayer(); stopFlingPlayer(); sst(); stw(); sor(); ssc()
 end))
+end
 
 -- FOV circle
 local fovGui=Instance.new("ScreenGui"); fovGui.Name="MM2FOV"; fovGui.Parent=guiParent; fovGui.ResetOnSpawn=false
@@ -601,7 +709,7 @@ local TAB_COUNT = #tabNames
 local TAB_PAD = 4
 
 local side=Instance.new("Frame")
-side.Size=UDim2.new(0,sideBg,1,-44)
+side.Size=UDim2.new(0,sideBg,1,-70)
 side.Position=UDim2.new(0,0,0,44)
 side.BackgroundColor3=Color3.fromRGB(15,15,15)
 side.BackgroundTransparency=0.2
@@ -621,13 +729,27 @@ sidePad.PaddingLeft=UDim.new(0,4)
 sidePad.PaddingRight=UDim.new(0,4)
 sidePad.Parent=side
 
+local BASE_BTN_H = 60
 local btnHeightProp = 0
 local function recalcBtnHeight()
 	local sh = side.AbsoluteSize.Y
 	if sh <= 0 then return end
 	btnHeightProp = (sh - TAB_PAD * (TAB_COUNT - 1) - 8) / TAB_COUNT
+	local s = btnHeightProp / BASE_BTN_H
 	for i, btn in ipairs(tabBtns) do
 		btn.Size = UDim2.new(1, 0, 0, btnHeightProp)
+		local ic = btn:FindFirstChild("Icon")
+		local lb = btn:FindFirstChild("Label")
+		if ic then
+			ic.Size = UDim2.new(1, 0, 0, 24 * s)
+			ic.Position = UDim2.new(0, 0, 0, 8 * s)
+			ic.TextSize = 16 * s
+		end
+		if lb then
+			lb.Size = UDim2.new(1, -4, 0, 18 * s)
+			lb.Position = UDim2.new(0, 2, 0, 30 * s)
+			lb.TextSize = 10 * s
+		end
 	end
 end
 
@@ -810,12 +932,13 @@ local murderInfo=Instance.new("TextLabel")
 murderInfo.Size=UDim2.new(1,-10,0,30); murderInfo.BackgroundTransparency=0.7; murderInfo.BackgroundColor3=Color3.new(0,0,0)
 murderInfo.TextColor3=Color3.fromRGB(255,200,200); murderInfo.Text="Waiting for round..."
 murderInfo.Font=Enum.Font.ArimoBold; murderInfo.TextSize=12; murderInfo.TextXAlignment=Enum.TextXAlignment.Left; murderInfo.Parent=tabConts[2]
+print("DEBUG: updateMurderInfo called, currentRole=", currentRole)
 local function updateMurderInfo()
 	local isM=(currentRole=="Murderer")
 	murderInfo.Text=isM and "You are the MURDERER!" or "Role: "..currentRole
 	murderInfo.TextColor3=isM and Color3.fromRGB(255,50,50) or Color3.fromRGB(200,200,200)
 end
-spawn(function() while wait(1) do updateMurderInfo() end end)
+task.spawn(function() while wait(1) do updateMurderInfo() end end)
 
 -- TAB 3: SHERIFF
 addSec(tabConts[3],"Combat")
@@ -850,6 +973,9 @@ addSlider(tabConts[5],"FOV Value",30,120,fovVal,function(v) fovVal=v end,"")
 
 
 -- TAB 6: TROLLING
+addSlider(tabConts[6],"Troll Speed",0,400,trollSpeed,function(v) trollSpeed=v end,"")
+
+-- Self Trolls
 addSec(tabConts[6],"Self Trolls")
 
 local ghostMode = false
@@ -912,128 +1038,173 @@ task.spawn(function()
 	end
 end)
 
-addSlider(tabConts[6],"Troll Speed",1,30,trollSpeed,function(v) trollSpeed=v end,"")
 addSec(tabConts[6],"Target Player Trolls")
 
-local tpContainer = Instance.new("Frame")
-tpContainer.Size = UDim2.new(1, 0, 0, 0)
-tpContainer.BackgroundTransparency = 1
-tpContainer.Parent = tabConts[6]
+local selectedTrollPlayer = nil
+local dropDownOpen = false
+local dropDownFrame = nil
+local dropDownBtn = nil
 
-local tpLayout = Instance.new("UIListLayout")
-tpLayout.Padding = UDim.new(0, 3)
-tpLayout.SortOrder = Enum.SortOrder.LayoutOrder
-tpLayout.Parent = tpContainer
+-- Container to keep dropdown button, list, and actions in layout order
+local trollContainer = Instance.new("Frame")
+trollContainer.Name = "trollContainer"
+trollContainer.Size = UDim2.new(1, -10, 0, 0)
+trollContainer.BackgroundTransparency = 1
+trollContainer.Parent = tabConts[6]
+local trollCLay = Instance.new("UIListLayout")
+trollCLay.Padding = UDim.new(0, 4)
+trollCLay.SortOrder = Enum.SortOrder.LayoutOrder
+trollCLay.Parent = trollContainer
 
-local function updateTPList()
-	for _, child in ipairs(tpContainer:GetChildren()) do
-		if not child:IsA("UIListLayout") then child:Destroy() end
+local ddBtn = Instance.new("TextButton")
+ddBtn.Name = "trollDropdownBtn"
+ddBtn.Size = UDim2.new(1, 0, 0, 34)
+ddBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ddBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+ddBtn.Text = "Select Player..."
+ddBtn.Font = Enum.Font.ArimoBold
+ddBtn.TextSize = 13
+ddBtn.BorderSizePixel = 0
+ddBtn.Parent = trollContainer
+Instance.new("UICorner", ddBtn).CornerRadius = UDim.new(0, 8)
+dropDownBtn = ddBtn
+
+local function rebuildActions()
+	local oldAction = trollContainer:FindFirstChild("trollActionFrame")
+	if oldAction then oldAction:Destroy() end
+	if not selectedTrollPlayer then
+		trollContainer.Size = UDim2.new(1, 0, 0, trollCLay.AbsoluteContentSize.Y)
+		task.defer(function() tabConts[6].CanvasSize = UDim2.new(0,0,0,tabConts[6].UIListLayout.AbsoluteContentSize.Y+10) end)
+		return
 	end
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= LP then
-			local row = Instance.new("Frame")
-			row.Size = UDim2.new(1, -10, 0, 32)
-			row.BackgroundTransparency = 1
-			row.Parent = tpContainer
 
-			local rowLayout = Instance.new("UIListLayout")
-			rowLayout.FillDirection = Enum.FillDirection.Horizontal
-			rowLayout.Padding = UDim.new(0, 3)
-			rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
-			rowLayout.Parent = row
+	local af = Instance.new("Frame")
+	af.Name = "trollActionFrame"
+	af.Size = UDim2.new(1, 0, 0, 0)
+	af.BackgroundTransparency = 1
+	af.Parent = trollContainer
 
-			local alive = getDead(p) == false and playerData and playerData[p.Name] ~= nil
-			local stat = Instance.new("TextLabel")
-			stat.Size = UDim2.new(0.12, -2, 1, 0)
-			stat.BackgroundColor3 = alive and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(180, 40, 40)
-			stat.Text = alive and "ON" or "DEAD"
-			stat.TextColor3 = Color3.fromRGB(255, 255, 255)
-			stat.Font = Enum.Font.ArimoBold
-			stat.TextSize = 8
-			stat.BorderSizePixel = 0
-			stat.Parent = row
-			Instance.new("UICorner", stat).CornerRadius = UDim.new(0, 4)
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = UDim2.new(0.5, -4, 0, 32)
+	grid.CellPadding = UDim2.new(0, 6, 0, 4)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.Parent = af
 
-			local b = Instance.new("TextButton")
-			b.Size = UDim2.new(0.22, -2, 1, 0)
-			b.BackgroundColor3 = L.accent
-			b.TextColor3 = Color3.fromRGB(255, 255, 255)
-			b.Text = "TP: " .. string.sub(p.Name, 1, 8)
-			b.Font = Enum.Font.ArimoBold
-			b.TextSize = 10
-			b.BorderSizePixel = 0
-			b.Parent = row
-			Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
-
-			b.MouseButton1Click:Connect(function()
-				local r = getRoot(p)
-				local mr = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-				if r and mr then
-					mr.CFrame = r.CFrame * CFrame.new(0, 3, -2)
-				end
-			end)
-
-			local b2 = Instance.new("TextButton")
-			b2.Size = UDim2.new(0.22, -2, 1, 0)
-			local isTroll = (trollWalkActive and currentTrollTarget == p)
-			b2.BackgroundColor3 = isTroll and Color3.fromRGB(60, 200, 60) or Color3.fromRGB(200, 60, 60)
-			b2.Text = isTroll and "Trolling" or "Troll"
-			b2.TextColor3 = Color3.fromRGB(255, 255, 255)
-			b2.Font = Enum.Font.ArimoBold
-			b2.TextSize = 10
-			b2.BorderSizePixel = 0
-			b2.Parent = row
-			Instance.new("UICorner", b2).CornerRadius = UDim.new(0, 6)
-
-			b2.MouseButton1Click:Connect(function()
-				trollWalkOnPlayer(p)
-				updateTPList()
-			end)
-
-			local b3 = Instance.new("TextButton")
-			b3.Size = UDim2.new(0.22, -2, 1, 0)
-			local isFollow = (followActive and followTarget == p)
-			b3.BackgroundColor3 = isFollow and Color3.fromRGB(60, 200, 60) or Color3.fromRGB(80, 80, 200)
-			b3.Text = isFollow and "Following" or "Follow"
-			b3.TextColor3 = Color3.fromRGB(255, 255, 255)
-			b3.Font = Enum.Font.ArimoBold
-			b3.TextSize = 10
-			b3.BorderSizePixel = 0
-			b3.Parent = row
-			Instance.new("UICorner", b3).CornerRadius = UDim.new(0, 6)
-
-			b3.MouseButton1Click:Connect(function()
-				followPlayer(p)
-				updateTPList()
-			end)
-
-			local b4 = Instance.new("TextButton")
-			b4.Size = UDim2.new(0.22, -2, 1, 0)
-			local isFling = (flingActive and flingTarget == p)
-			b4.BackgroundColor3 = isFling and Color3.fromRGB(60, 200, 60) or Color3.fromRGB(120, 40, 180)
-			b4.Text = isFling and "Flinging" or "Fling"
-			b4.TextColor3 = Color3.fromRGB(255, 255, 255)
-			b4.Font = Enum.Font.ArimoBold
-			b4.TextSize = 10
-			b4.BorderSizePixel = 0
-			b4.Parent = row
-			Instance.new("UICorner", b4).CornerRadius = UDim.new(0, 6)
-
-			b4.MouseButton1Click:Connect(function()
-				toggleFling(p)
-				updateTPList()
-			end)
-		end
+	for _, f in ipairs(_G.trollingFeatures) do
+		local active = f.af(selectedTrollPlayer)
+		local b = Instance.new("TextButton")
+		b.Size = UDim2.new(1, 0, 1, 0)
+		b.BackgroundColor3 = active and Color3.fromRGB(40, 180, 40) or f.color
+		b.BackgroundTransparency = 0.15
+		b.TextColor3 = Color3.fromRGB(255, 255, 255)
+		b.Text = f.label .. (active and " [ON]" or "")
+		b.Font = Enum.Font.ArimoBold
+		b.TextSize = 12
+		b.BorderSizePixel = 0
+		b.Parent = af
+		Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+		b.MouseButton1Click:Connect(function()
+			f.tf(selectedTrollPlayer)
+			rebuildActions()
+		end)
 	end
+
 	task.defer(function()
-		tpContainer.Size = UDim2.new(1, 0, 0, tpLayout.AbsoluteContentSize.Y)
-		tabConts[6].CanvasSize = UDim2.new(0, 0, 0, tabConts[6].UIListLayout.AbsoluteContentSize.Y + 20)
+		af.Size = UDim2.new(1, 0, 0, grid.AbsoluteContentSize.Y)
+		trollContainer.Size = UDim2.new(1, 0, 0, trollCLay.AbsoluteContentSize.Y)
+		tabConts[6].CanvasSize = UDim2.new(0,0,0,tabConts[6].UIListLayout.AbsoluteContentSize.Y+10)
 	end)
 end
 
-ac(Players.PlayerAdded:Connect(updateTPList))
-ac(Players.PlayerRemoving:Connect(updateTPList))
-updateTPList()
+local function rebuildDropList()
+	if dropDownFrame then
+		dropDownFrame:Destroy()
+		dropDownFrame = nil
+	end
+	dropDownOpen = false
+	if not dropDownBtn then return end
+
+	dropDownFrame = Instance.new("Frame")
+	dropDownFrame.Size = UDim2.new(1, 0, 0, 0)
+	dropDownFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+	dropDownFrame.BackgroundTransparency = 0.1
+	dropDownFrame.BorderSizePixel = 0
+	dropDownFrame.Parent = trollContainer
+	Instance.new("UICorner", dropDownFrame).CornerRadius = UDim.new(0, 8)
+	local lst = Instance.new("UIListLayout")
+	lst.Padding = UDim.new(0, 2)
+	lst.SortOrder = Enum.SortOrder.LayoutOrder
+	lst.Parent = dropDownFrame
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LP then
+			local pb = Instance.new("TextButton")
+			pb.Size = UDim2.new(1, -8, 0, 28)
+			pb.Position = UDim2.new(0, 4, 0, 0)
+			pb.BackgroundColor3 = (selectedTrollPlayer == p) and L.accent or Color3.fromRGB(35, 35, 35)
+			pb.Text = p.Name .. (getDead(p) and " [DEAD]" or "")
+			pb.TextColor3 = getDead(p) and Color3.fromRGB(140, 140, 140) or Color3.fromRGB(220, 220, 220)
+			pb.Font = Enum.Font.ArimoBold
+			pb.TextSize = 12
+			pb.TextXAlignment = Enum.TextXAlignment.Left
+			pb.BorderSizePixel = 0
+			pb.Parent = dropDownFrame
+			Instance.new("UICorner", pb).CornerRadius = UDim.new(0, 6)
+			pb.MouseButton1Click:Connect(function()
+				-- disable all active features on previous player
+				if selectedTrollPlayer and selectedTrollPlayer ~= p then
+					for _, f in ipairs(_G.trollingFeatures) do
+						if f.af(selectedTrollPlayer) then
+							pcall(function() f.tf(selectedTrollPlayer) end)
+						end
+					end
+				end
+				selectedTrollPlayer = p
+				dropDownBtn.Text = "Player: " .. p.Name
+				dropDownFrame:Destroy()
+				dropDownFrame = nil
+				dropDownOpen = false
+				rebuildActions()
+			end)
+		end
+	end
+
+	task.defer(function()
+		if dropDownFrame then
+			local h = 0
+			for _, ch in ipairs(dropDownFrame:GetChildren()) do
+				if ch:IsA("TextButton") then h = h + ch.AbsoluteSize.Y + 2 end
+			end
+			h = h + 8
+			dropDownFrame.Size = UDim2.new(1, 0, 0, math.min(h, 180))
+			trollContainer.Size = UDim2.new(1, 0, 0, trollCLay.AbsoluteContentSize.Y)
+			tabConts[6].CanvasSize = UDim2.new(0,0,0,tabConts[6].UIListLayout.AbsoluteContentSize.Y+10)
+		end
+	end)
+end
+
+ddBtn.MouseButton1Click:Connect(function()
+	if dropDownOpen then
+		if dropDownFrame then dropDownFrame:Destroy(); dropDownFrame = nil end
+		dropDownOpen = false
+		trollContainer.Size = UDim2.new(1, 0, 0, trollCLay.AbsoluteContentSize.Y)
+	else
+		rebuildDropList()
+		dropDownOpen = true
+	end
+end)
+
+ac(Players.PlayerAdded:Connect(function()
+	if dropDownOpen then rebuildDropList() end
+end))
+ac(Players.PlayerRemoving:Connect(function(p)
+	if dropDownOpen then rebuildDropList() end
+	if selectedTrollPlayer == p then
+		selectedTrollPlayer = nil
+		dropDownBtn.Text = "Select Player..."
+		rebuildActions()
+	end
+end))
 
 -- TAB 7: WORLD
 addSec(tabConts[7],"Auto")
@@ -1044,7 +1215,7 @@ local infoL=Instance.new("TextLabel")
 infoL.Size=UDim2.new(1,-10,0,40); infoL.BackgroundTransparency=0.7; infoL.BackgroundColor3=Color3.new(0,0,0)
 infoL.TextColor3=L.text; infoL.Text="Role: "..currentRole; infoL.Font=Enum.Font.ArimoBold
 infoL.TextSize=12; infoL.TextXAlignment=Enum.TextXAlignment.Left; infoL.Parent=tabConts[7]
-spawn(function() while wait(1) do infoL.Text="Your Role: "..currentRole.." | Players: "..#Players:GetPlayers() end end)
+task.spawn(function() while wait(1) do infoL.Text="Your Role: "..currentRole.." | Players: "..#Players:GetPlayers() end end)
 
 -- Layout system
 local layouts={
@@ -1056,18 +1227,8 @@ local layouts={
 	{name="Ocean",bg=Color3.fromRGB(3,15,35),accent=Color3.fromRGB(0,160,220),text=Color3.fromRGB(180,230,255),border=Color3.fromRGB(0,70,120)},
 	{name="Hacker",bg=Color3.fromRGB(3,12,3),accent=Color3.fromRGB(0,255,50),text=Color3.fromRGB(50,255,50),border=Color3.fromRGB(0,70,0)},
 	{name="Minimal",bg=Color3.fromRGB(15,15,15),accent=Color3.fromRGB(200,200,200),text=Color3.fromRGB(255,255,255),border=Color3.fromRGB(60,60,60)},
-	{name="Bold",bg=Color3.fromRGB(0,0,0),accent=Color3.fromRGB(255,255,255),text=Color3.fromRGB(255,255,255),border=Color3.fromRGB(128,128,128)},
-	{name="Retro",bg=Color3.fromRGB(40,30,10),accent=Color3.fromRGB(255,150,50),text=Color3.fromRGB(255,200,100),border=Color3.fromRGB(100,70,20)},
-	{name="Ice",bg=Color3.fromRGB(20,25,35),accent=Color3.fromRGB(100,200,255),text=Color3.fromRGB(220,240,255),border=Color3.fromRGB(50,120,180)},
-	{name="Lavender",bg=Color3.fromRGB(25,15,35),accent=Color3.fromRGB(200,150,255),text=Color3.fromRGB(240,220,255),border=Color3.fromRGB(100,60,150)},
-	{name="Mint",bg=Color3.fromRGB(15,30,20),accent=Color3.fromRGB(100,255,150),text=Color3.fromRGB(200,255,220),border=Color3.fromRGB(50,120,80)},
-	{name="Sunset",bg=Color3.fromRGB(40,15,10),accent=Color3.fromRGB(255,120,50),text=Color3.fromRGB(255,200,180),border=Color3.fromRGB(120,60,30)},
 	{name="Midnight",bg=Color3.fromRGB(5,5,15),accent=Color3.fromRGB(60,60,120),text=Color3.fromRGB(180,180,220),border=Color3.fromRGB(30,30,60)},
-	{name="Candy",bg=Color3.fromRGB(35,10,25),accent=Color3.fromRGB(255,80,200),text=Color3.fromRGB(255,200,240),border=Color3.fromRGB(130,40,100)},
-	{name="Solarized",bg=Color3.fromRGB(25,30,20),accent=Color3.fromRGB(180,120,50),text=Color3.fromRGB(200,190,160),border=Color3.fromRGB(80,70,50)},
 	{name="Dracula",bg=Color3.fromRGB(20,15,30),accent=Color3.fromRGB(255,100,200),text=Color3.fromRGB(240,220,255),border=Color3.fromRGB(100,60,120)},
-	{name="Nord",bg=Color3.fromRGB(15,20,30),accent=Color3.fromRGB(80,160,200),text=Color3.fromRGB(200,210,220),border=Color3.fromRGB(50,70,100)},
-	{name="Gruvbox",bg=Color3.fromRGB(30,25,20),accent=Color3.fromRGB(200,120,50),text=Color3.fromRGB(220,200,170),border=Color3.fromRGB(80,65,50)},
 }
 local curLayIdx=1
 local layBtns={}
@@ -1150,6 +1311,26 @@ ac(game.DescendantAdded:Connect(function(v)
 end))
 
 addSlider(tabConts[8],"Audio Volume",0,100,audioVolume,updateVolume,"%")
+addSec(tabConts[8],"Transparency")
+local origTransparencies={}
+addSlider(tabConts[8],"BG Alpha",0,100,90,function(v)
+	bgT=v/100; local dfl=0.9
+	local skip={main,title,foot,side}; for _,c in ipairs(tabConts) do table.insert(skip,c) end
+	for _,o in main:GetDescendants() do
+		if (o:IsA("Frame") or o:IsA("TextButton")) and not o:IsA("TextLabel") then
+			local blocked=false; for _,s in ipairs(skip) do if o==s then blocked=true; break end end
+			if not blocked then
+				if origTransparencies[o]==nil then origTransparencies[o]=o.BackgroundTransparency end
+				local orig=origTransparencies[o]
+				if bgT<=dfl then
+					o.BackgroundTransparency=orig*(bgT/dfl)
+				else
+					o.BackgroundTransparency=orig+(1-orig)*((bgT-dfl)/(1-dfl))
+				end
+			end
+		end
+	end
+end,"%")
 addSec(tabConts[8],"Layout Themes")
 local function makeLayRow()
 	local r=Instance.new("Frame"); r.Size=UDim2.new(1,-10,0,28); r.BackgroundTransparency=1; r.Parent=tabConts[8]
@@ -1212,57 +1393,6 @@ rndAcc.Size=UDim2.new(0,44,0,20); rndAcc.BackgroundColor3=Color3.fromRGB(40,40,4
 rndAcc.TextColor3=Color3.fromRGB(150,150,150); rndAcc.Text="RND"; rndAcc.Font=Enum.Font.ArimoBold; rndAcc.TextSize=10; rndAcc.BorderSizePixel=1; rndAcc.BorderColor3=Color3.fromRGB(60,60,60); rndAcc.Parent=accRow
 rndAcc.MouseButton1Click:Connect(function()
 	local l=layouts[curLayIdx]; l.accent=Color3.fromRGB(math.random(0,255),math.random(0,255),math.random(0,255)); applyLayout(curLayIdx)
-end)
-
-addSec(tabConts[7],"Border Style")
-addBtn(tabConts[7],"Thin Border",function() main.BorderSizePixel=1 end)
-addBtn(tabConts[7],"Default Border",function() main.BorderSizePixel=2 end)
-addBtn(tabConts[7],"Thick Border",function() main.BorderSizePixel=4 end)
-addBtn(tabConts[7],"No Border",function() main.BorderSizePixel=0 end)
-
-addSec(tabConts[7],"Window Size")
-addBtn(tabConts[7],"Reset Size (520x560)",function() main.Size=UDim2.new(0,520,0,560) end)
-local sizeL=Instance.new("TextLabel")
-sizeL.Size=UDim2.new(1,-10,0,20); sizeL.BackgroundTransparency=1; sizeL.TextColor3=Color3.fromRGB(140,140,140)
-sizeL.Text="Drag corner to resize"; sizeL.Font=Enum.Font.ArimoBold; sizeL.TextSize=11; sizeL.Parent=tabConts[7]
-
-addSec(tabConts[7],"Title Style")
-addBtn(tabConts[7],"Default",function() title.Text="MM2 HACK" end)
-addBtn(tabConts[7],"Full Name",function() title.Text="MURDER MYSTERY 2" end)
-addBtn(tabConts[7],"Minimal",function() title.Text="MM2" end)
-addBtn(tabConts[7],"Fancy",function() title.Text="> mm2_hack" end)
-
-addSec(tabConts[7],"Transparency")
-local origTransparencies={}
-addSlider(tabConts[7],"BG Alpha",0,100,90,function(v)
-	bgT=v/100; local dfl=0.9
-	local skip={main,title,foot,side}; for _,c in ipairs(tabConts) do table.insert(skip,c) end
-	for _,o in main:GetDescendants() do
-		if (o:IsA("Frame") or o:IsA("TextButton")) and not o:IsA("TextLabel") then
-			local blocked=false; for _,s in ipairs(skip) do if o==s then blocked=true; break end end
-			if not blocked then
-				if origTransparencies[o]==nil then origTransparencies[o]=o.BackgroundTransparency end
-				local orig=origTransparencies[o]
-				if bgT<=dfl then
-					o.BackgroundTransparency=orig*(bgT/dfl)
-				else
-					o.BackgroundTransparency=orig+(1-orig)*((bgT-dfl)/(1-dfl))
-				end
-			end
-		end
-	end
-end,"%")
-
-addSec(tabConts[7],"Settings")
-addBtn(tabConts[7],"Reset All Layouts",function()
-	local defs={
-		{name="Default",bg=Color3.fromRGB(10,10,10),accent=Color3.fromRGB(80,160,255),text=Color3.fromRGB(220,220,220),border=Color3.fromRGB(60,60,60)},
-		{name="Cyberpunk",bg=Color3.fromRGB(5,8,25),accent=Color3.fromRGB(0,180,255),text=Color3.fromRGB(200,255,240),border=Color3.fromRGB(0,80,140)},
-	}
-	for _,l in ipairs(layouts) do
-		for _,d in ipairs(defs) do if d.name==l.name then l.bg=d.bg; l.accent=d.accent; l.text=d.text; l.border=d.border; break end end
-	end
-	applyLayout(curLayIdx)
 end)
 
 -- Movement/Systems
@@ -1380,7 +1510,7 @@ ac(RSv.RenderStepped:Connect(function()
 	end
 end))
 -- Auto Collect
-spawn(function()
+task.spawn(function()
 	while wait(0.3) do
 		if acCoins then
 			local mp=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
@@ -1782,7 +1912,7 @@ ac(workspace.DescendantAdded:Connect(function(v)
 		checkParent()
 	end
 end))
-spawn(function()
+task.spawn(function()
 	while wait(0.3) do
 		pcall(updateWepESP)
 		pcall(updateCoinESP)

@@ -220,11 +220,19 @@ local function stopFlingPlayer()
 	flingTarget = nil
 end
 
+local camDist=12
 local function camBehind(tr)
 	if not tr then return end
 	local lv=CAM.CFrame.LookVector
-	CAM.CFrame=CFrame.lookAt(tr.Position+Vector3.new(0,5,10),tr.Position+Vector3.new(0,5,10)+lv)
+	local dir=Vector3.new(lv.X,0,lv.Z).Unit
+	local headPos=tr.Position+Vector3.new(0,3,0)
+	CAM.CFrame=CFrame.lookAt(headPos-dir*camDist+Vector3.new(0,2,0),headPos)
 end
+UIS.InputChanged:Connect(function(i)
+	if i.UserInputType==Enum.UserInputType.MouseWheel then
+		camDist=math.clamp(camDist-i.Position.Z*2,3,60)
+	end
+end)
 local occludedParts={}
 local function clearOccluded()
 	for p,t in pairs(occludedParts) do
@@ -238,7 +246,7 @@ local function handleOcclusion(from,to)
 	local filter={LP.Character,CAM}
 	params.FilterDescendantsInstances=filter
 	local result=workspace:Raycast(from,(to-from).Unit*((to-from).Magnitude),params)
-	local hit=result and result.Instance and (result.Instance:IsA("BasePart") or result.Instance:IsA("UnionOperation")) and result.Instance
+	local hit=result and result.Instance and (result.Instance:IsA("BasePart") or result.Instance:IsA("UnionOperation") or result.Instance:IsA("MeshPart")) and result.Instance
 	for p,t in pairs(occludedParts) do
 		if p~=hit and p.Parent then p.Transparency=t end
 		if p~=hit then occludedParts[p]=nil end

@@ -525,6 +525,7 @@ _G.trollingFeatures={
 	{key="stalk",label="Stalk",color=Color3.fromRGB(60,200,200),af=function(p)return stA and stT==p end,tf=tst},
 	{key="trollWalk",label="TrollWalk",color=Color3.fromRGB(0,200,255),af=function(p)return twA and twT==p end,tf=ttw},
 	{key="orbit",label="Orbit",color=Color3.fromRGB(255,150,0),af=function(p)return orA and orT==p end,tf=tor},
+	{key="fling",label="Fling",color=Color3.fromRGB(255,80,80),af=function(p)return flingActive and flingTarget==p end,tf=toggleFling},
 	{key="teleport",label="Teleport",color=Color3.fromRGB(200,200,0),af=function(p)return tpA and tpT==p end,tf=ttp},
 	{key="scare",label="Scare",color=Color3.fromRGB(255,60,60),af=function(p)return scA and scT==p end,tf=tsc},
 }

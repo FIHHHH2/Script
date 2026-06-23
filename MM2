@@ -178,14 +178,41 @@ local function instantKillMurderer()
 		local mRoot = getRoot(mud)
 		if mRoot then
 			local oldCF = root.CFrame
-			root.CFrame = mRoot.CFrame * CFrame.new(0, 0, 4)
+			local mPos = mRoot.Position
+			local head = mud.Character and mud.Character:FindFirstChild("Head")
+			if head then mPos = head.Position end
+
+			-- Velocity prediction
+			local vel = mRoot.AssemblyLinearVelocity
+			local dist = (CAM.CFrame.Position - mPos).Magnitude
+			local bulletSpeed = 200
+			local travelTime = dist / bulletSpeed
+			mPos = mPos + vel * travelTime
+
+			root.CFrame = CFrame.new(mPos) * CFrame.new(0, 0, 4)
 			task.wait(0.1)
 			if not char:FindFirstChild("Gun") then
 				hum:EquipTool(gun)
 			end
 			task.wait(0.1)
-			CAM.CFrame = CFrame.new(CAM.CFrame.Position, mRoot.Position)
+			CAM.CFrame = CFrame.new(CAM.CFrame.Position, mPos)
+
+			-- Try multiple activation methods
 			gun:Activate()
+			task.wait(0.05)
+			gun:Activate()
+			-- Try firing remote events on the gun
+			for _,v in gun:GetDescendants() do
+				if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
+					pcall(function() v:FireServer(unpack(v:GetChildren())) end)
+				end
+				if v:IsA("BindableEvent") then
+					pcall(function() v:Fire(unpack(v:GetChildren())) end)
+				end
+				if v:IsA("ClickDetector") then
+					pcall(function() fireclickdetector(v) end)
+				end
+			end
 			task.wait(0.15)
 			root.CFrame = oldCF
 		end
@@ -609,22 +636,26 @@ local function getSilentAimTarget()
 	return nil, nil
 end
 
-pcall(function()
-	local playerMouse=LP:GetMouse()
-	local oldIndex
-	oldIndex=hookmetamethod(game,"__index",function(self,key)
-		if _G.MM2_HookActive and not checkcaller() and self==playerMouse then
-			if key=="Hit" then
-				local targetCF,targetPart=getSilentAimTarget()
-				if targetCF then return targetCF end
-			elseif key=="Target" then
-				local targetCF,targetPart=getSilentAimTarget()
-				if targetPart then return targetPart end
+if hookmetamethod and checkcaller then
+	pcall(function()
+		local playerMouse=LP:GetMouse()
+		local oldIndex
+		oldIndex=hookmetamethod(game,"__index",function(self,key)
+			if self==playerMouse then
+				if not checkcaller() then
+					if key=="Hit" then
+						local targetCF,targetPart=getSilentAimTarget()
+						if targetCF then return targetCF end
+					elseif key=="Target" then
+						local targetCF,targetPart=getSilentAimTarget()
+						if targetPart then return targetPart end
+					end
+				end
 			end
-		end
-		return oldIndex(self,key)
+			return oldIndex(self,key)
+		end)
 	end)
-end)
+end
 
 -- UI
 local gui=Instance.new("ScreenGui")
@@ -1214,6 +1245,7 @@ ac(Players.PlayerRemoving:Connect(function(p)
 	end
 end))
 
+
 -- TAB 7: WORLD
 addSec(tabConts[7],"Auto")
 addTog(tabConts[7],"Auto Collect Coins",acCoins,function(s) acCoins=s end)
@@ -1476,10 +1508,11 @@ ac(RSv.RenderStepped:Connect(function()
 					if not hit then
 						CAM.CFrame=CAM.CFrame:Lerp(CFrame.new(CAM.CFrame.Position,tp),0.5)
 					end
-				end
 			end
 		end
-		-- Sheriff Auto-Kill Murderer
+	end
+	end
+	-- Sheriff Auto-Kill Murderer
 		if autoKillMurderer and (currentRole == "Sheriff" or currentRole == "Hero" or c:FindFirstChild("Gun") or (LP.Backpack and LP.Backpack:FindFirstChild("Gun"))) then
 			local mud = getMurderer()
 			if mud then
@@ -1491,9 +1524,16 @@ ac(RSv.RenderStepped:Connect(function()
 							gun.Parent = c
 						else
 							local tp = r.Position
-							if mud.Character and mud.Character:FindFirstChild("Head") then tp = mud.Character.Head.Position end
-							CAM.CFrame = CAM.CFrame:Lerp(CFrame.new(CAM.CFrame.Position, tp), 0.3)
-							if tick() - lastShotTime > 0.5 then
+							local head = mud.Character and mud.Character:FindFirstChild("Head")
+							if head then tp = head.Position end
+							-- Velocity prediction for jumping targets
+							local vel = r.AssemblyLinearVelocity
+							local dist = (CAM.CFrame.Position - tp).Magnitude
+							local bulletSpeed = 200
+							local travelTime = dist / bulletSpeed
+							tp = tp + vel * travelTime
+							CAM.CFrame = CAM.CFrame:Lerp(CFrame.new(CAM.CFrame.Position, tp), 0.5)
+							if tick() - lastShotTime > 0.35 then
 								lastShotTime = tick()
 								gun:Activate()
 							end
@@ -1515,8 +1555,7 @@ ac(RSv.RenderStepped:Connect(function()
 			end
 		end
 		updateFOVCircle()
-	end
-end))
+	end))
 -- Auto Collect
 task.spawn(function()
 	while wait(0.3) do

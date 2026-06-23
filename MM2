@@ -224,9 +224,8 @@ local camDist=12
 local function camBehind(tr)
 	if not tr then return end
 	local lv=CAM.CFrame.LookVector
-	local dir=Vector3.new(lv.X,0,lv.Z).Unit
 	local headPos=tr.Position+Vector3.new(0,3,0)
-	CAM.CFrame=CFrame.lookAt(headPos-dir*camDist+Vector3.new(0,2,0),headPos)
+	CAM.CFrame=CFrame.lookAt(headPos-lv*camDist,headPos)
 end
 UIS.InputChanged:Connect(function(i)
 	if i.UserInputType==Enum.UserInputType.MouseWheel then

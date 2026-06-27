@@ -1,0 +1,1925 @@
+--[[
+    ██╗     ██╗   ██╗██████╗ ██╗  ██╗██╗███╗   ██╗ ██████╗ 
+    ██║     ██║   ██║██╔══██╗██║ ██╔╝██║████╗  ██║██╔════╝ 
+    ██║     ██║   ██║██████╔╝█████╔╝ ██║██╔██╗ ██║██║  ███╗
+    ██║     ██║   ██║██╔══██╗██╔═██╗ ██║██║╚██╗██║██║   ██║
+    ███████╗╚██████╔╝██║  ██║██║  ██╗██║██║ ╚████║╚██████╔╝
+    ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═════╝ 
+        GIANTS CHEAT MENU v2.0 — Built by Antigravity
+        Game: Lurking Giants (PlaceId: 6328880674)
+        Toggle Menu: Right Shift
+        Features: Server-Sided Cheats | Configurable ESP | Replicated Flashlight
+]]
+-- SERVICES
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local StarterGui = game:GetService("StarterGui")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+-- GAME REFERENCES
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local CurrentStats = ReplicatedStorage:WaitForChild("CurrentStats")
+-- COLOR PRESETS
+local ColorPresets = {
+    {Name = "Green",  Color = Color3.fromRGB(0, 255, 0)},
+    {Name = "Red",    Color = Color3.fromRGB(255, 0, 0)},
+    {Name = "Blue",   Color = Color3.fromRGB(0, 100, 255)},
+    {Name = "Yellow", Color = Color3.fromRGB(255, 255, 0)},
+    {Name = "Purple", Color = Color3.fromRGB(180, 0, 255)},
+    {Name = "White",  Color = Color3.fromRGB(255, 255, 255)},
+    {Name = "Cyan",   Color = Color3.fromRGB(0, 255, 255)},
+    {Name = "Orange", Color = Color3.fromRGB(255, 140, 0)},
+    {Name = "Pink",   Color = Color3.fromRGB(255, 100, 200)},
+}
+-- CHEAT STATE
+local CheatState = {
+    -- Survivor
+    SpeedHack = false, SpeedValue = 32,
+    InfiniteStamina = false, Noclip = false,
+    Fly = false, FlySpeed = 50,
+    GodMode = false, AntiRagdoll = false,
+    AutoSprint = false, JumpBoost = false,
+    -- Flashlight (network-replicated)
+    InfiniteFlashlight = false,
+    FlashlightRange = false, FlashlightRangeValue = 60,
+    FlashlightBrightness = 3, FlashlightAngle = 120,
+    -- Giant
+    GiantSpeed = false, GiantSpeedValue = 80,
+    GiantWallhack = false, GiantReach = false,
+    GiantAutoChase = false,
+    -- Visual
+    Fullbright = false, NoFog = false,
+    FOVChanger = false, FOVValue = 90,
+    ThirdPerson = false,
+    -- ESP Config
+    PlayerESP = false, GiantESP = false,
+    ESPPlayerColor = Color3.fromRGB(0, 255, 0),
+    ESPPlayerFill = 0.5, ESPPlayerOutline = 0,
+    ESPShowDist = true, ESPShowHealth = true, ESPShowNames = true,
+    ESPDistColor = Color3.fromRGB(255, 200, 50),
+    ESPGiantColor = Color3.fromRGB(255, 0, 0),
+    ESPGiantFill = 0.3, ESPGiantOutline = 0,
+    ESPMaxDist = 10000, ESPTextSize = 14,
+    ESPRainbow = false,
+    -- Server-Sided
+    SSAntiCheat = false, SSSprint = false,
+    SSInfiniteFlashlight = false,
+    -- Internal
+    _connections = {}, _espObjects = {}, _giantEspObjects = {},
+    _flyBodyVelocity = nil, _flyBodyGyro = nil,
+    _savedPosition = nil, _rainbowHue = 0,
+}
+-- ============ UTILITY FUNCTIONS ============
+local function getCharacter()
+    return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+end
+local function getHumanoid()
+    local char = getCharacter()
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
+local function getRootPart()
+    local char = getCharacter()
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+local function getMonster()
+    for _, child in pairs(Workspace:GetChildren()) do
+        if child:FindFirstChild("DogServer") or child.Name == "locust" then
+            return child
+        end
+    end
+    local monsters = Workspace:FindFirstChild("ShopBackground")
+    if monsters then
+        local mFolder = monsters:FindFirstChild("Monsters")
+        if mFolder then
+            for _, m in pairs(mFolder:GetChildren()) do
+                if m:IsA("Model") then return m end
+            end
+        end
+    end
+    return nil
+end
+local function getAllPlayers()
+    local players = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then table.insert(players, player) end
+    end
+    return players
+end
+local function notify(title, text, duration)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = title or "Lurking Giants",
+            Text = text or "",
+            Duration = duration or 3
+        })
+    end)
+end
+local function disconnectKey(key)
+    if CheatState._connections[key] then
+        CheatState._connections[key]:Disconnect()
+        CheatState._connections[key] = nil
+    end
+end
+local function getFlashlightTool(character)
+    if not character then return nil end
+    local tool = character:FindFirstChild("Flashlight")
+    if not tool then
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then tool = bp:FindFirstChild("Flashlight") end
+    end
+    return tool
+end
+local function getLanternTool(character)
+    if not character then return nil end
+    local tool = character:FindFirstChild("Lantern")
+    if not tool then
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then tool = bp:FindFirstChild("Lantern") end
+    end
+    return tool
+end
+-- ============ GUI CREATION ============
+if LocalPlayer.PlayerGui:FindFirstChild("LurkingGiantsCheatMenu") then
+    LocalPlayer.PlayerGui:FindFirstChild("LurkingGiantsCheatMenu"):Destroy()
+end
+pcall(function()
+    if game:GetService("CoreGui"):FindFirstChild("LurkingGiantsCheatMenu") then
+        game:GetService("CoreGui"):FindFirstChild("LurkingGiantsCheatMenu"):Destroy()
+    end
+end)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "LurkingGiantsCheatMenu"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.DisplayOrder = 999
+if syn and syn.protect_gui then
+    syn.protect_gui(ScreenGui)
+    ScreenGui.Parent = game:GetService("CoreGui")
+else
+    ScreenGui.Parent = LocalPlayer.PlayerGui
+end
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 560, 0, 620)
+MainFrame.Position = UDim2.new(0.5, -280, 0.5, -310)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = true
+MainFrame.Parent = ScreenGui
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 12)
+MainCorner.Parent = MainFrame
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(120, 50, 200)
+MainStroke.Thickness = 2
+MainStroke.Transparency = 0.3
+MainStroke.Parent = MainFrame
+local StrokeGradient = Instance.new("UIGradient")
+StrokeGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 50, 80)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(120, 50, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(50, 200, 255))
+})
+StrokeGradient.Parent = MainStroke
+-- Animated gradient rotation
+spawn(function()
+    local rotation = 0
+    while ScreenGui.Parent do
+        rotation = (rotation + 1) % 360
+        StrokeGradient.Rotation = rotation
+        task.wait(0.03)
+    end
+end)
+-- Title Bar
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 45)
+TitleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 12)
+TitleCorner.Parent = TitleBar
+local TitleFix = Instance.new("Frame")
+TitleFix.Size = UDim2.new(1, 0, 0, 12)
+TitleFix.Position = UDim2.new(0, 0, 1, -12)
+TitleFix.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
+TitleFix.BorderSizePixel = 0
+TitleFix.Parent = TitleBar
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Text = "LURKING GIANTS — CHEAT MENU v2.0"
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.TextSize = 15
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Size = UDim2.new(1, -80, 1, 0)
+TitleLabel.Position = UDim2.new(0, 15, 0, 0)
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Parent = TitleBar
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Text = "X"
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 18
+CloseBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
+CloseBtn.BackgroundTransparency = 1
+CloseBtn.Size = UDim2.new(0, 40, 0, 40)
+CloseBtn.Position = UDim2.new(1, -45, 0, 2)
+CloseBtn.Parent = TitleBar
+CloseBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
+local MinBtn = Instance.new("TextButton")
+MinBtn.Text = "-"
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.TextSize = 18
+MinBtn.TextColor3 = Color3.fromRGB(255, 200, 50)
+MinBtn.BackgroundTransparency = 1
+MinBtn.Size = UDim2.new(0, 40, 0, 40)
+MinBtn.Position = UDim2.new(1, -80, 0, 2)
+MinBtn.Parent = TitleBar
+MinBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+end)
+-- Make draggable
+local dragging, dragInput, dragStart, startPos
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+TitleBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+-- Tab Bar
+local TabBar = Instance.new("Frame")
+TabBar.Size = UDim2.new(1, -20, 0, 35)
+TabBar.Position = UDim2.new(0, 10, 0, 50)
+TabBar.BackgroundTransparency = 1
+TabBar.Parent = MainFrame
+local TabLayout = Instance.new("UIListLayout")
+TabLayout.FillDirection = Enum.FillDirection.Horizontal
+TabLayout.Padding = UDim.new(0, 4)
+TabLayout.Parent = TabBar
+-- Content Area
+local ContentArea = Instance.new("ScrollingFrame")
+ContentArea.Name = "ContentArea"
+ContentArea.Size = UDim2.new(1, -20, 1, -100)
+ContentArea.Position = UDim2.new(0, 10, 0, 92)
+ContentArea.BackgroundTransparency = 1
+ContentArea.BorderSizePixel = 0
+ContentArea.ScrollBarThickness = 4
+ContentArea.ScrollBarImageColor3 = Color3.fromRGB(120, 50, 200)
+ContentArea.CanvasSize = UDim2.new(0, 0, 0, 0)
+ContentArea.AutomaticCanvasSize = Enum.AutomaticSize.Y
+ContentArea.Parent = MainFrame
+local ContentLayout = Instance.new("UIListLayout")
+ContentLayout.Padding = UDim.new(0, 6)
+ContentLayout.Parent = ContentArea
+-- ============ TAB SYSTEM ============
+local Tabs = {}
+local TabPages = {}
+local function createTab(name, icon)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Text = icon .. " " .. name
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextSize = 12
+    btn.TextColor3 = Color3.fromRGB(180, 180, 180)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
+    btn.Size = UDim2.new(0, 100, 1, 0)
+    btn.BorderSizePixel = 0
+    btn.Parent = TabBar
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 8)
+    btnCorner.Parent = btn
+    local page = Instance.new("Frame")
+    page.Name = name .. "Page"
+    page.Size = UDim2.new(1, 0, 0, 0)
+    page.AutomaticSize = Enum.AutomaticSize.Y
+    page.BackgroundTransparency = 1
+    page.Visible = false
+    page.Parent = ContentArea
+    local pageLayout = Instance.new("UIListLayout")
+    pageLayout.Padding = UDim.new(0, 5)
+    pageLayout.Parent = page
+    Tabs[name] = btn
+    TabPages[name] = page
+    btn.MouseButton1Click:Connect(function()
+        for n, b in pairs(Tabs) do
+            b.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
+            b.TextColor3 = Color3.fromRGB(180, 180, 180)
+            TabPages[n].Visible = false
+        end
+        btn.BackgroundColor3 = Color3.fromRGB(60, 30, 120)
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        page.Visible = true
+    end)
+    return page
+end
+-- ============ WIDGET BUILDERS ============
+local function createToggle(parent, label, stateKey, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 36)
+    frame.BackgroundColor3 = Color3.fromRGB(22, 22, 38)
+    frame.BorderSizePixel = 0
+    frame.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
+    local lbl = Instance.new("TextLabel")
+    lbl.Text = "  " .. label
+    lbl.Font = Enum.Font.GothamSemibold
+    lbl.TextSize = 13
+    lbl.TextColor3 = Color3.fromRGB(220, 220, 230)
+    lbl.BackgroundTransparency = 1
+    lbl.Size = UDim2.new(1, -60, 1, 0)
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = frame
+    local toggle = Instance.new("TextButton")
+    toggle.Size = UDim2.new(0, 44, 0, 22)
+    toggle.Position = UDim2.new(1, -52, 0.5, -11)
+    toggle.BackgroundColor3 = CheatState[stateKey] and Color3.fromRGB(80, 200, 80) or Color3.fromRGB(60, 60, 80)
+    toggle.Text = ""
+    toggle.BorderSizePixel = 0
+    toggle.Parent = frame
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.CornerRadius = UDim.new(1, 0)
+    toggleCorner.Parent = toggle
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 18, 0, 18)
+    knob.Position = CheatState[stateKey] and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    knob.Parent = toggle
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(1, 0)
+    knobCorner.Parent = knob
+    toggle.MouseButton1Click:Connect(function()
+        CheatState[stateKey] = not CheatState[stateKey]
+        local on = CheatState[stateKey]
+        TweenService:Create(toggle, TweenInfo.new(0.2), {
+            BackgroundColor3 = on and Color3.fromRGB(80, 200, 80) or Color3.fromRGB(60, 60, 80)
+        }):Play()
+        TweenService:Create(knob, TweenInfo.new(0.2), {
+            Position = on and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+        }):Play()
+        if callback then callback(on) end
+    end)
+    return toggle
+end
+local function createSlider(parent, label, min, max, default, stateKey, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 50)
+    frame.BackgroundColor3 = Color3.fromRGB(22, 22, 38)
+    frame.BorderSizePixel = 0
+    frame.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
+    local lbl = Instance.new("TextLabel")
+    lbl.Text = "  " .. label
+    lbl.Font = Enum.Font.GothamSemibold
+    lbl.TextSize = 13
+    lbl.TextColor3 = Color3.fromRGB(220, 220, 230)
+    lbl.BackgroundTransparency = 1
+    lbl.Size = UDim2.new(0.6, 0, 0, 20)
+    lbl.Position = UDim2.new(0, 0, 0, 2)
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = frame
+    local valLabel = Instance.new("TextLabel")
+    valLabel.Text = tostring(default)
+    valLabel.Font = Enum.Font.GothamBold
+    valLabel.TextSize = 13
+    valLabel.TextColor3 = Color3.fromRGB(120, 180, 255)
+    valLabel.BackgroundTransparency = 1
+    valLabel.Size = UDim2.new(0.35, 0, 0, 20)
+    valLabel.Position = UDim2.new(0.6, 0, 0, 2)
+    valLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valLabel.Parent = frame
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(1, -20, 0, 8)
+    sliderBg.Position = UDim2.new(0, 10, 0, 32)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+    sliderBg.BorderSizePixel = 0
+    sliderBg.Parent = frame
+    local sliderBgCorner = Instance.new("UICorner")
+    sliderBgCorner.CornerRadius = UDim.new(1, 0)
+    sliderBgCorner.Parent = sliderBg
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(120, 50, 200)
+    fill.BorderSizePixel = 0
+    fill.Parent = sliderBg
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(1, 0)
+    fillCorner.Parent = fill
+    local sliderBtn = Instance.new("TextButton")
+    sliderBtn.Size = UDim2.new(1, 0, 1, 0)
+    sliderBtn.BackgroundTransparency = 1
+    sliderBtn.Text = ""
+    sliderBtn.Parent = sliderBg
+    local sliding = false
+    sliderBtn.MouseButton1Down:Connect(function() sliding = true end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then sliding = false end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if sliding and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local rel = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
+            local value = math.floor(min + (max - min) * rel)
+            fill.Size = UDim2.new(rel, 0, 1, 0)
+            valLabel.Text = tostring(value)
+            CheatState[stateKey] = value
+            if callback then callback(value) end
+        end
+    end)
+end
+-- Float slider for 0.0 - 1.0 ranges (ESP transparency etc.)
+local function createFloatSlider(parent, label, min, max, default, stateKey, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 50)
+    frame.BackgroundColor3 = Color3.fromRGB(22, 22, 38)
+    frame.BorderSizePixel = 0
+    frame.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
+    local lbl = Instance.new("TextLabel")
+    lbl.Text = "  " .. label
+    lbl.Font = Enum.Font.GothamSemibold
+    lbl.TextSize = 13
+    lbl.TextColor3 = Color3.fromRGB(220, 220, 230)
+    lbl.BackgroundTransparency = 1
+    lbl.Size = UDim2.new(0.6, 0, 0, 20)
+    lbl.Position = UDim2.new(0, 0, 0, 2)
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = frame
+    local valLabel = Instance.new("TextLabel")
+    valLabel.Text = string.format("%.2f", default)
+    valLabel.Font = Enum.Font.GothamBold
+    valLabel.TextSize = 13
+    valLabel.TextColor3 = Color3.fromRGB(120, 180, 255)
+    valLabel.BackgroundTransparency = 1
+    valLabel.Size = UDim2.new(0.35, 0, 0, 20)
+    valLabel.Position = UDim2.new(0.6, 0, 0, 2)
+    valLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valLabel.Parent = frame
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(1, -20, 0, 8)
+    sliderBg.Position = UDim2.new(0, 10, 0, 32)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+    sliderBg.BorderSizePixel = 0
+    sliderBg.Parent = frame
+    local sliderBgCorner = Instance.new("UICorner")
+    sliderBgCorner.CornerRadius = UDim.new(1, 0)
+    sliderBgCorner.Parent = sliderBg
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(120, 50, 200)
+    fill.BorderSizePixel = 0
+    fill.Parent = sliderBg
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(1, 0)
+    fillCorner.Parent = fill
+    local sliderBtn = Instance.new("TextButton")
+    sliderBtn.Size = UDim2.new(1, 0, 1, 0)
+    sliderBtn.BackgroundTransparency = 1
+    sliderBtn.Text = ""
+    sliderBtn.Parent = sliderBg
+    local sliding = false
+    sliderBtn.MouseButton1Down:Connect(function() sliding = true end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then sliding = false end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if sliding and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local rel = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
+            local value = math.floor((min + (max - min) * rel) * 100) / 100
+            fill.Size = UDim2.new(rel, 0, 1, 0)
+            valLabel.Text = string.format("%.2f", value)
+            CheatState[stateKey] = value
+            if callback then callback(value) end
+        end
+    end)
+end
+local function createButton(parent, label, callback)
+    local btn = Instance.new("TextButton")
+    btn.Text = "  " .. label
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextSize = 13
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.BackgroundColor3 = Color3.fromRGB(60, 30, 120)
+    btn.Size = UDim2.new(1, 0, 0, 36)
+    btn.BorderSizePixel = 0
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = btn
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(80, 40, 160)}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(60, 30, 120)}):Play()
+    end)
+    btn.MouseButton1Click:Connect(function()
+        if callback then callback() end
+    end)
+end
+local function createSectionLabel(parent, text)
+    local lbl = Instance.new("TextLabel")
+    lbl.Text = "── " .. text .. " ──"
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 12
+    lbl.TextColor3 = Color3.fromRGB(120, 100, 200)
+    lbl.BackgroundTransparency = 1
+    lbl.Size = UDim2.new(1, 0, 0, 24)
+    lbl.Parent = parent
+end
+-- COLOR PICKER WIDGET
+local function createColorPicker(parent, label, stateKey, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 58)
+    frame.BackgroundColor3 = Color3.fromRGB(22, 22, 38)
+    frame.BorderSizePixel = 0
+    frame.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
+    local lbl = Instance.new("TextLabel")
+    lbl.Text = "  " .. label
+    lbl.Font = Enum.Font.GothamSemibold
+    lbl.TextSize = 13
+    lbl.TextColor3 = Color3.fromRGB(220, 220, 230)
+    lbl.BackgroundTransparency = 1
+    lbl.Size = UDim2.new(1, 0, 0, 22)
+    lbl.Position = UDim2.new(0, 0, 0, 2)
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = frame
+    -- Current color preview
+    local preview = Instance.new("Frame")
+    preview.Size = UDim2.new(0, 18, 0, 18)
+    preview.Position = UDim2.new(1, -28, 0, 4)
+    preview.BackgroundColor3 = CheatState[stateKey]
+    preview.BorderSizePixel = 0
+    preview.Parent = frame
+    local previewCorner = Instance.new("UICorner")
+    previewCorner.CornerRadius = UDim.new(1, 0)
+    previewCorner.Parent = preview
+    -- Color button row
+    local colorRow = Instance.new("Frame")
+    colorRow.Size = UDim2.new(1, -16, 0, 24)
+    colorRow.Position = UDim2.new(0, 8, 0, 28)
+    colorRow.BackgroundTransparency = 1
+    colorRow.Parent = frame
+    local rowLayout = Instance.new("UIListLayout")
+    rowLayout.FillDirection = Enum.FillDirection.Horizontal
+    rowLayout.Padding = UDim.new(0, 4)
+    rowLayout.Parent = colorRow
+    for _, preset in ipairs(ColorPresets) do
+        local colorBtn = Instance.new("TextButton")
+        colorBtn.Size = UDim2.new(0, 24, 0, 24)
+        colorBtn.BackgroundColor3 = preset.Color
+        colorBtn.Text = ""
+        colorBtn.BorderSizePixel = 0
+        colorBtn.Parent = colorRow
+        local cCorner = Instance.new("UICorner")
+        cCorner.CornerRadius = UDim.new(0, 6)
+        cCorner.Parent = colorBtn
+        -- Selection indicator
+        local selStroke = Instance.new("UIStroke")
+        selStroke.Color = Color3.fromRGB(255, 255, 255)
+        selStroke.Thickness = 0
+        selStroke.Parent = colorBtn
+        colorBtn.MouseButton1Click:Connect(function()
+            CheatState[stateKey] = preset.Color
+            preview.BackgroundColor3 = preset.Color
+            -- Reset all strokes in this row
+            for _, child in pairs(colorRow:GetChildren()) do
+                if child:IsA("TextButton") then
+                    local s = child:FindFirstChildOfClass("UIStroke")
+                    if s then s.Thickness = 0 end
+                end
+            end
+            selStroke.Thickness = 2
+            if callback then callback(preset.Color) end
+        end)
+        -- Highlight current selection on init
+        if CheatState[stateKey] == preset.Color then
+            selStroke.Thickness = 2
+        end
+    end
+end
+-- ============ CREATE TABS ============
+local survivorPage = createTab("Survivor", "⚡")
+local giantPage = createTab("Giant", "👹")
+local visualPage = createTab("Visual", "👁")
+local serverPage = createTab("Server", "🔗")
+local utilPage = createTab("Utility", "🔧")
+-- Select first tab
+Tabs["Survivor"].BackgroundColor3 = Color3.fromRGB(60, 30, 120)
+Tabs["Survivor"].TextColor3 = Color3.fromRGB(255, 255, 255)
+TabPages["Survivor"].Visible = true
+-- ================================================================
+--                     SURVIVOR TAB
+-- ================================================================
+createSectionLabel(survivorPage, "MOVEMENT")
+createToggle(survivorPage, "Speed Hack", "SpeedHack", function(on)
+    local humanoid = getHumanoid()
+    if humanoid then
+        humanoid.WalkSpeed = on and CheatState.SpeedValue or 16
+    end
+    notify("Speed Hack", on and ("ON - Speed: " .. CheatState.SpeedValue) or "OFF")
+end)
+createSlider(survivorPage, "Speed Value", 16, 200, 32, "SpeedValue", function(val)
+    if CheatState.SpeedHack then
+        local humanoid = getHumanoid()
+        if humanoid then humanoid.WalkSpeed = val end
+    end
+end)
+createToggle(survivorPage, "Auto Sprint (Infinite)", "AutoSprint", function(on)
+    if on then
+        disconnectKey("AutoSprint")
+        CheatState._connections["AutoSprint"] = RunService.Heartbeat:Connect(function()
+            if CheatState.AutoSprint then
+                local humanoid = getHumanoid()
+                if humanoid and humanoid.MoveDirection.Magnitude > 0 then
+                    humanoid.WalkSpeed = math.max(humanoid.WalkSpeed, CheatState.SpeedHack and CheatState.SpeedValue or 24)
+                end
+            end
+        end)
+    else
+        disconnectKey("AutoSprint")
+    end
+    notify("Auto Sprint", on and "ON" or "OFF")
+end)
+createToggle(survivorPage, "Noclip", "Noclip", function(on)
+    if on then
+        disconnectKey("Noclip")
+        CheatState._connections["Noclip"] = RunService.Stepped:Connect(function()
+            if CheatState.Noclip then
+                local char = getCharacter()
+                if char then
+                    for _, part in pairs(char:GetDescendants()) do
+                        if part:IsA("BasePart") then part.CanCollide = false end
+                    end
+                end
+            end
+        end)
+    else
+        disconnectKey("Noclip")
+        local char = getCharacter()
+        if char then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and (part.Name == "HumanoidRootPart" or part.Name == "Torso" or part.Name == "Head") then
+                    part.CanCollide = true
+                end
+            end
+        end
+    end
+    notify("Noclip", on and "ON - Walk through walls!" or "OFF")
+end)
+createToggle(survivorPage, "Fly (WASD+Space/Ctrl)", "Fly", function(on)
+    local rootPart = getRootPart()
+    if not rootPart then return end
+    if on then
+        local bv = Instance.new("BodyVelocity")
+        bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        bv.Velocity = Vector3.new(0, 0, 0)
+        bv.Parent = rootPart
+        CheatState._flyBodyVelocity = bv
+        local bg = Instance.new("BodyGyro")
+        bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+        bg.P = 9000
+        bg.Parent = rootPart
+        CheatState._flyBodyGyro = bg
+        disconnectKey("Fly")
+        CheatState._connections["Fly"] = RunService.RenderStepped:Connect(function()
+            if CheatState.Fly and CheatState._flyBodyVelocity then
+                local speed = CheatState.FlySpeed
+                local moveDir = Vector3.new(0, 0, 0)
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + Camera.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - Camera.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - Camera.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + Camera.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+                if moveDir.Magnitude > 0 then moveDir = moveDir.Unit end
+                CheatState._flyBodyVelocity.Velocity = moveDir * speed
+                CheatState._flyBodyGyro.CFrame = Camera.CFrame
+            end
+        end)
+        local humanoid = getHumanoid()
+        if humanoid then humanoid.PlatformStand = true end
+    else
+        if CheatState._flyBodyVelocity then CheatState._flyBodyVelocity:Destroy() CheatState._flyBodyVelocity = nil end
+        if CheatState._flyBodyGyro then CheatState._flyBodyGyro:Destroy() CheatState._flyBodyGyro = nil end
+        disconnectKey("Fly")
+        local humanoid = getHumanoid()
+        if humanoid then humanoid.PlatformStand = false end
+    end
+    notify("Fly", on and ("ON - Speed: " .. CheatState.FlySpeed) or "OFF")
+end)
+createSlider(survivorPage, "Fly Speed", 10, 300, 50, "FlySpeed")
+createSectionLabel(survivorPage, "SURVIVAL")
+createToggle(survivorPage, "God Mode (Anti-Kill)", "GodMode", function(on)
+    if on then
+        disconnectKey("GodMode")
+        CheatState._connections["GodMode"] = RunService.Heartbeat:Connect(function()
+            if CheatState.GodMode then
+                local humanoid = getHumanoid()
+                if humanoid then humanoid.Health = humanoid.MaxHealth end
+            end
+        end)
+    else
+        disconnectKey("GodMode")
+    end
+    notify("God Mode", on and "ON - Health locked!" or "OFF")
+end)
+createToggle(survivorPage, "Anti-Ragdoll", "AntiRagdoll", function(on)
+    if on then
+        disconnectKey("AntiRagdoll")
+        CheatState._connections["AntiRagdoll"] = RunService.Heartbeat:Connect(function()
+            if CheatState.AntiRagdoll then
+                local char = getCharacter()
+                if char then
+                    local isRag = char:FindFirstChild("IsRagdoll")
+                    if isRag and isRag.Value then isRag.Value = false end
+                    local humanoid = getHumanoid()
+                    if humanoid then humanoid.PlatformStand = false end
+                end
+            end
+        end)
+    else
+        disconnectKey("AntiRagdoll")
+    end
+    notify("Anti-Ragdoll", on and "ON" or "OFF")
+end)
+createSectionLabel(survivorPage, "FLASHLIGHT (Replicated)")
+createToggle(survivorPage, "Infinite Flashlight Battery", "InfiniteFlashlight", function(on)
+    notify("Infinite Flashlight", on and "ON - Battery never drains!" or "OFF")
+end)
+createToggle(survivorPage, "Extended Flashlight (All Clients)", "FlashlightRange", function(on)
+    if on then
+        disconnectKey("FlashRange")
+        CheatState._connections["FlashRange"] = RunService.Heartbeat:Connect(function()
+            if CheatState.FlashlightRange then
+                local char = getCharacter()
+                if not char then return end
+                -- Modify the actual Flashlight tool's SpotLight (replicates to all clients)
+                local flashlight = getFlashlightTool(char)
+                if flashlight then
+                    local handle = flashlight:FindFirstChild("Handle")
+                    if handle then
+                        local spotlight = handle:FindFirstChildOfClass("SpotLight")
+                        if spotlight then
+                            spotlight.Range = CheatState.FlashlightRangeValue
+                            spotlight.Brightness = CheatState.FlashlightBrightness
+                            spotlight.Angle = CheatState.FlashlightAngle
+                        end
+                    end
+                end
+                -- Also modify Lantern lights
+                local lantern = getLanternTool(char)
+                if lantern then
+                    for _, desc in pairs(lantern:GetDescendants()) do
+                        if desc:IsA("SpotLight") or desc:IsA("PointLight") or desc:IsA("SurfaceLight") then
+                            desc.Range = CheatState.FlashlightRangeValue
+                            desc.Brightness = CheatState.FlashlightBrightness
+                        end
+                    end
+                end
+                -- Also scan character for any equipped tool lights
+                for _, desc in pairs(char:GetDescendants()) do
+                    if desc:IsA("SpotLight") or desc:IsA("PointLight") or desc:IsA("SurfaceLight") then
+                        desc.Range = CheatState.FlashlightRangeValue
+                        desc.Brightness = CheatState.FlashlightBrightness
+                        if desc:IsA("SpotLight") then
+                            desc.Angle = CheatState.FlashlightAngle
+                        end
+                    end
+                end
+            end
+        end)
+    else
+        disconnectKey("FlashRange")
+        -- Reset flashlight to defaults
+        pcall(function()
+            local char = getCharacter()
+            if char then
+                local flashlight = getFlashlightTool(char)
+                if flashlight then
+                    local handle = flashlight:FindFirstChild("Handle")
+                    if handle then
+                        local spotlight = handle:FindFirstChildOfClass("SpotLight")
+                        if spotlight then
+                            spotlight.Range = 16
+                            spotlight.Brightness = 1
+                            spotlight.Angle = 45
+                        end
+                    end
+                end
+            end
+        end)
+    end
+    notify("Flashlight Range", on and "ON - Visible to all clients!" or "OFF")
+end)
+createSlider(survivorPage, "Flashlight Range", 10, 500, 60, "FlashlightRangeValue")
+createSlider(survivorPage, "Flashlight Brightness", 1, 10, 3, "FlashlightBrightness")
+createSlider(survivorPage, "Flashlight Beam Angle", 20, 180, 120, "FlashlightAngle")
+createToggle(survivorPage, "Jump Power Boost", "JumpBoost", function(on)
+    local humanoid = getHumanoid()
+    if humanoid then
+        if humanoid.UseJumpPower then
+            humanoid.JumpPower = on and 100 or 50
+        else
+            humanoid.JumpHeight = on and 20 or 7.2
+        end
+    end
+    notify("Jump Boost", on and "ON" or "OFF")
+end)
+-- ================================================================
+--                     GIANT TAB
+-- ================================================================
+createSectionLabel(giantPage, "GIANT MOVEMENT")
+createToggle(giantPage, "Giant Speed Hack", "GiantSpeed", function(on)
+    local humanoid = getHumanoid()
+    if humanoid then
+        humanoid.WalkSpeed = on and CheatState.GiantSpeedValue or 16
+    end
+    notify("Giant Speed", on and ("ON - Speed: " .. CheatState.GiantSpeedValue) or "OFF")
+end)
+createSlider(giantPage, "Giant Speed Value", 16, 300, 80, "GiantSpeedValue", function(val)
+    if CheatState.GiantSpeed then
+        local humanoid = getHumanoid()
+        if humanoid then humanoid.WalkSpeed = val end
+    end
+end)
+createSectionLabel(giantPage, "GIANT ABILITIES")
+createButton(giantPage, "⚡ Teleport to Nearest Player", function()
+    local rootPart = getRootPart()
+    if not rootPart then notify("Error", "No character!") return end
+    local nearest, nearestDist = nil, math.huge
+    for _, player in pairs(getAllPlayers()) do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local dist = (player.Character.HumanoidRootPart.Position - rootPart.Position).Magnitude
+            if dist < nearestDist then nearest = player nearestDist = dist end
+        end
+    end
+    if nearest and nearest.Character and nearest.Character:FindFirstChild("HumanoidRootPart") then
+        rootPart.CFrame = nearest.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -5)
+        notify("Teleport", "TP to " .. nearest.Name .. " (" .. math.floor(nearestDist) .. " studs)")
+    else
+        notify("Error", "No players found!")
+    end
+end)
+createButton(giantPage, "🎲 Teleport to Random Player", function()
+    local rootPart = getRootPart()
+    if not rootPart then return end
+    local validPlayers = {}
+    for _, p in pairs(getAllPlayers()) do
+        if p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            table.insert(validPlayers, p)
+        end
+    end
+    if #validPlayers > 0 then
+        local target = validPlayers[math.random(1, #validPlayers)]
+        rootPart.CFrame = target.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -5)
+        notify("Teleport", "TP to " .. target.Name)
+    end
+end)
+createToggle(giantPage, "Giant Wallhack (See Thru Walls)", "GiantWallhack", function(on)
+    if on then
+        disconnectKey("GiantWH")
+        CheatState._connections["GiantWH"] = RunService.Heartbeat:Connect(function()
+            if CheatState.GiantWallhack then
+                local map = Workspace:FindFirstChild("RevampedForestMap")
+                if map then
+                    local mapFolder = map:FindFirstChild("Map")
+                    if mapFolder then
+                        for _, part in pairs(mapFolder:GetDescendants()) do
+                            if part:IsA("BasePart") then part.Transparency = math.max(part.Transparency, 0.7) end
+                        end
+                    end
+                end
+            end
+        end)
+    else
+        disconnectKey("GiantWH")
+        local map = Workspace:FindFirstChild("RevampedForestMap")
+        if map then
+            local mapFolder = map:FindFirstChild("Map")
+            if mapFolder then
+                for _, part in pairs(mapFolder:GetDescendants()) do
+                    if part:IsA("BasePart") then part.Transparency = 0 end
+                end
+            end
+        end
+    end
+    notify("Giant Wallhack", on and "ON - See through map!" or "OFF")
+end)
+createToggle(giantPage, "Extended Reach (Giant Hitbox)", "GiantReach", function(on)
+    if on then
+        disconnectKey("GiantReach")
+        CheatState._connections["GiantReach"] = RunService.Heartbeat:Connect(function()
+            if CheatState.GiantReach then
+                local char = getCharacter()
+                if char then
+                    for _, p in pairs(char:GetDescendants()) do
+                        if p:IsA("BasePart") then
+                            p.Size = Vector3.new(math.max(p.Size.X, 6), p.Size.Y, math.max(p.Size.Z, 6))
+                        end
+                    end
+                end
+            end
+        end)
+    else
+        disconnectKey("GiantReach")
+    end
+    notify("Giant Reach", on and "ON - Extended hitbox!" or "OFF")
+end)
+createSectionLabel(giantPage, "GIANT CONTROL")
+createToggle(giantPage, "Auto-Chase Nearest Player", "GiantAutoChase", function(on)
+    if on then
+        disconnectKey("AutoChase")
+        CheatState._connections["AutoChase"] = RunService.Heartbeat:Connect(function()
+            if CheatState.GiantAutoChase then
+                local rootPart = getRootPart()
+                local humanoid = getHumanoid()
+                if rootPart and humanoid then
+                    local nearest, nearestDist = nil, math.huge
+                    for _, player in pairs(getAllPlayers()) do
+                        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                            local dist = (player.Character.HumanoidRootPart.Position - rootPart.Position).Magnitude
+                            if dist < nearestDist then nearest = player nearestDist = dist end
+                        end
+                    end
+                    if nearest and nearest.Character then
+                        humanoid:MoveTo(nearest.Character.HumanoidRootPart.Position)
+                    end
+                end
+            end
+        end)
+    else
+        disconnectKey("AutoChase")
+    end
+    notify("Auto-Chase", on and "ON - Chasing nearest!" or "OFF")
+end)
+-- ================================================================
+--                     VISUAL TAB
+-- ================================================================
+createSectionLabel(visualPage, "PLAYER ESP SETTINGS")
+-- ESP functions that use configurable settings
+local function createESP(player)
+    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "CheatESP"
+    highlight.FillColor = CheatState.ESPPlayerColor
+    highlight.FillTransparency = CheatState.ESPPlayerFill
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.OutlineTransparency = CheatState.ESPPlayerOutline
+    highlight.Adornee = player.Character
+    highlight.Parent = player.Character
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Name = "CheatESPLabel"
+    billboardGui.Size = UDim2.new(0, 200, 0, 70)
+    billboardGui.StudsOffset = Vector3.new(0, 3, 0)
+    billboardGui.AlwaysOnTop = true
+    billboardGui.Adornee = player.Character:FindFirstChild("Head") or player.Character:FindFirstChild("HumanoidRootPart")
+    billboardGui.Parent = player.Character
+    -- Name label
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Text = player.Name
+    nameLabel.Size = UDim2.new(1, 0, 0, 18)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.TextStrokeTransparency = 0
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextSize = CheatState.ESPTextSize
+    nameLabel.Visible = CheatState.ESPShowNames
+    nameLabel.Parent = billboardGui
+    -- Distance label
+    local distLabel = Instance.new("TextLabel")
+    distLabel.Name = "DistLabel"
+    distLabel.Size = UDim2.new(1, 0, 0, 16)
+    distLabel.Position = UDim2.new(0, 0, 0, 18)
+    distLabel.BackgroundTransparency = 1
+    distLabel.TextColor3 = CheatState.ESPDistColor
+    distLabel.TextStrokeTransparency = 0
+    distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    distLabel.Font = Enum.Font.GothamSemibold
+    distLabel.TextSize = CheatState.ESPTextSize - 2
+    distLabel.Visible = CheatState.ESPShowDist
+    distLabel.Parent = billboardGui
+    -- Health bar background
+    local healthBg = Instance.new("Frame")
+    healthBg.Name = "HealthBg"
+    healthBg.Size = UDim2.new(0.6, 0, 0, 6)
+    healthBg.Position = UDim2.new(0.2, 0, 0, 38)
+    healthBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    healthBg.BorderSizePixel = 0
+    healthBg.Visible = CheatState.ESPShowHealth
+    healthBg.Parent = billboardGui
+    local healthBgCorner = Instance.new("UICorner")
+    healthBgCorner.CornerRadius = UDim.new(1, 0)
+    healthBgCorner.Parent = healthBg
+    local healthFill = Instance.new("Frame")
+    healthFill.Name = "HealthFill"
+    healthFill.Size = UDim2.new(1, 0, 1, 0)
+    healthFill.BackgroundColor3 = Color3.fromRGB(80, 255, 80)
+    healthFill.BorderSizePixel = 0
+    healthFill.Parent = healthBg
+    local healthFillCorner = Instance.new("UICorner")
+    healthFillCorner.CornerRadius = UDim.new(1, 0)
+    healthFillCorner.Parent = healthFill
+    table.insert(CheatState._espObjects, {
+        highlight = highlight,
+        billboard = billboardGui,
+        player = player,
+        distLabel = distLabel,
+        nameLabel = nameLabel,
+        healthBg = healthBg,
+        healthFill = healthFill,
+    })
+end
+local function clearESP()
+    for _, obj in pairs(CheatState._espObjects) do
+        pcall(function() if obj.highlight and obj.highlight.Parent then obj.highlight:Destroy() end end)
+        pcall(function() if obj.billboard and obj.billboard.Parent then obj.billboard:Destroy() end end)
+    end
+    CheatState._espObjects = {}
+end
+local function refreshESPSettings()
+    for _, obj in pairs(CheatState._espObjects) do
+        pcall(function()
+            if obj.highlight and obj.highlight.Parent then
+                obj.highlight.FillColor = CheatState.ESPRainbow and Color3.fromHSV(CheatState._rainbowHue, 1, 1) or CheatState.ESPPlayerColor
+                obj.highlight.FillTransparency = CheatState.ESPPlayerFill
+                obj.highlight.OutlineTransparency = CheatState.ESPPlayerOutline
+            end
+            if obj.nameLabel and obj.nameLabel.Parent then
+                obj.nameLabel.Visible = CheatState.ESPShowNames
+                obj.nameLabel.TextSize = CheatState.ESPTextSize
+            end
+            if obj.distLabel and obj.distLabel.Parent then
+                obj.distLabel.Visible = CheatState.ESPShowDist
+                obj.distLabel.TextColor3 = CheatState.ESPDistColor
+                obj.distLabel.TextSize = CheatState.ESPTextSize - 2
+            end
+            if obj.healthBg and obj.healthBg.Parent then
+                obj.healthBg.Visible = CheatState.ESPShowHealth
+            end
+        end)
+    end
+end
+local function clearGiantESP()
+    for _, obj in pairs(CheatState._giantEspObjects) do
+        pcall(function() if obj.highlight and obj.highlight.Parent then obj.highlight:Destroy() end end)
+        pcall(function() if obj.billboard and obj.billboard.Parent then obj.billboard:Destroy() end end)
+    end
+    CheatState._giantEspObjects = {}
+end
+createToggle(visualPage, "Player ESP", "PlayerESP", function(on)
+    if on then
+        clearESP()
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then createESP(player) end
+        end
+        disconnectKey("ESPUpdate")
+        CheatState._connections["ESPUpdate"] = RunService.Heartbeat:Connect(function()
+            if CheatState.PlayerESP then
+                -- Rainbow cycling
+                if CheatState.ESPRainbow then
+                    CheatState._rainbowHue = (CheatState._rainbowHue + 0.005) % 1
+                end
+                local myRoot = getRootPart()
+                for _, obj in pairs(CheatState._espObjects) do
+                    pcall(function()
+                        if obj.player and obj.player.Character and obj.player.Character:FindFirstChild("HumanoidRootPart") and myRoot then
+                            local dist = math.floor((obj.player.Character.HumanoidRootPart.Position - myRoot.Position).Magnitude)
+                            -- Distance filter
+                            if dist > CheatState.ESPMaxDist then
+                                if obj.highlight then obj.highlight.Enabled = false end
+                                if obj.billboard then obj.billboard.Enabled = false end
+                            else
+                                if obj.highlight then
+                                    obj.highlight.Enabled = true
+                                    obj.highlight.FillColor = CheatState.ESPRainbow and Color3.fromHSV(CheatState._rainbowHue, 1, 1) or CheatState.ESPPlayerColor
+                                    obj.highlight.FillTransparency = CheatState.ESPPlayerFill
+                                    obj.highlight.OutlineTransparency = CheatState.ESPPlayerOutline
+                                end
+                                if obj.billboard then obj.billboard.Enabled = true end
+                            end
+                            -- Distance label
+                            if obj.distLabel and obj.distLabel.Parent then
+                                obj.distLabel.Text = dist .. " studs"
+                                obj.distLabel.TextColor3 = CheatState.ESPDistColor
+                                obj.distLabel.TextSize = CheatState.ESPTextSize - 2
+                                obj.distLabel.Visible = CheatState.ESPShowDist
+                            end
+                            -- Name label
+                            if obj.nameLabel and obj.nameLabel.Parent then
+                                obj.nameLabel.Visible = CheatState.ESPShowNames
+                                obj.nameLabel.TextSize = CheatState.ESPTextSize
+                            end
+                            -- Health bar
+                            if obj.healthBg and obj.healthBg.Parent then
+                                obj.healthBg.Visible = CheatState.ESPShowHealth
+                                local hum = obj.player.Character:FindFirstChildOfClass("Humanoid")
+                                if hum and obj.healthFill then
+                                    local pct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+                                    obj.healthFill.Size = UDim2.new(pct, 0, 1, 0)
+                                    -- Color: green->yellow->red
+                                    obj.healthFill.BackgroundColor3 = Color3.fromHSV(pct * 0.33, 1, 1)
+                                end
+                            end
+                        end
+                    end)
+                end
+            end
+        end)
+        disconnectKey("ESPAdded")
+        CheatState._connections["ESPAdded"] = Players.PlayerAdded:Connect(function(player)
+            if CheatState.PlayerESP then
+                player.CharacterAdded:Connect(function() task.wait(1) createESP(player) end)
+            end
+        end)
+        -- Re-create ESP when players respawn
+        disconnectKey("ESPCharAdded")
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                player.CharacterAdded:Connect(function()
+                    if CheatState.PlayerESP then
+                        task.wait(1)
+                        -- Remove old ESP for this player
+                        for i = #CheatState._espObjects, 1, -1 do
+                            local obj = CheatState._espObjects[i]
+                            if obj.player == player then
+                                pcall(function() if obj.highlight then obj.highlight:Destroy() end end)
+                                pcall(function() if obj.billboard then obj.billboard:Destroy() end end)
+                                table.remove(CheatState._espObjects, i)
+                            end
+                        end
+                        createESP(player)
+                    end
+                end)
+            end
+        end
+    else
+        clearESP()
+        disconnectKey("ESPUpdate")
+        disconnectKey("ESPAdded")
+    end
+    notify("Player ESP", on and "ON" or "OFF")
+end)
+createColorPicker(visualPage, "Player ESP Color", "ESPPlayerColor", function(color)
+    refreshESPSettings()
+end)
+createFloatSlider(visualPage, "Player Fill Transparency", 0, 1, 0.5, "ESPPlayerFill", function() refreshESPSettings() end)
+createFloatSlider(visualPage, "Player Outline Transparency", 0, 1, 0, "ESPPlayerOutline", function() refreshESPSettings() end)
+createToggle(visualPage, "Show Player Names", "ESPShowNames", function() refreshESPSettings() end)
+createToggle(visualPage, "Show Distance Labels", "ESPShowDist", function() refreshESPSettings() end)
+createToggle(visualPage, "Show Health Bars", "ESPShowHealth", function() refreshESPSettings() end)
+createColorPicker(visualPage, "Distance Label Color", "ESPDistColor", function() refreshESPSettings() end)
+createSlider(visualPage, "ESP Text Size", 8, 24, 14, "ESPTextSize", function() refreshESPSettings() end)
+createSlider(visualPage, "ESP Max Distance", 50, 10000, 10000, "ESPMaxDist")
+createToggle(visualPage, "Rainbow ESP (Cycling Colors)", "ESPRainbow", function() refreshESPSettings() end)
+createSectionLabel(visualPage, "GIANT/MONSTER ESP")
+createToggle(visualPage, "Giant/Monster ESP", "GiantESP", function(on)
+    if on then
+        disconnectKey("GiantESPLoop")
+        CheatState._connections["GiantESPLoop"] = RunService.Heartbeat:Connect(function()
+            if CheatState.GiantESP then
+                -- Rainbow for giant too
+                if CheatState.ESPRainbow then
+                    CheatState._rainbowHue = (CheatState._rainbowHue + 0.005) % 1
+                end
+                for _, child in pairs(Workspace:GetChildren()) do
+                    if child:FindFirstChild("DogServer") or child.Name == "locust" then
+                        if not child:FindFirstChild("GiantESPHighlight") then
+                            local h = Instance.new("Highlight")
+                            h.Name = "GiantESPHighlight"
+                            h.FillColor = CheatState.ESPGiantColor
+                            h.FillTransparency = CheatState.ESPGiantFill
+                            h.OutlineColor = Color3.fromRGB(255, 50, 50)
+                            h.OutlineTransparency = CheatState.ESPGiantOutline
+                            h.Parent = child
+                            local bb = Instance.new("BillboardGui")
+                            bb.Name = "GiantESPLabel"
+                            bb.Size = UDim2.new(0, 200, 0, 50)
+                            bb.StudsOffset = Vector3.new(0, 10, 0)
+                            bb.AlwaysOnTop = true
+                            bb.Adornee = child:FindFirstChild("HumanoidRootPart") or child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
+                            bb.Parent = child
+                            local lbl = Instance.new("TextLabel")
+                            lbl.Name = "GiantName"
+                            lbl.Text = "⚠ GIANT ⚠"
+                            lbl.Size = UDim2.new(1, 0, 0, 24)
+                            lbl.BackgroundTransparency = 1
+                            lbl.TextColor3 = Color3.fromRGB(255, 50, 50)
+                            lbl.TextStrokeTransparency = 0
+                            lbl.Font = Enum.Font.GothamBold
+                            lbl.TextSize = 18
+                            lbl.Parent = bb
+                            local distLbl = Instance.new("TextLabel")
+                            distLbl.Name = "GiantDist"
+                            distLbl.Size = UDim2.new(1, 0, 0, 18)
+                            distLbl.Position = UDim2.new(0, 0, 0, 24)
+                            distLbl.BackgroundTransparency = 1
+                            distLbl.TextColor3 = Color3.fromRGB(255, 200, 50)
+                            distLbl.TextStrokeTransparency = 0
+                            distLbl.Font = Enum.Font.GothamSemibold
+                            distLbl.TextSize = 14
+                            distLbl.Parent = bb
+                            table.insert(CheatState._giantEspObjects, {highlight = h, billboard = bb})
+                        else
+                            -- Update existing giant ESP
+                            local h = child:FindFirstChild("GiantESPHighlight")
+                            if h then
+                                h.FillColor = CheatState.ESPRainbow and Color3.fromHSV(CheatState._rainbowHue, 1, 1) or CheatState.ESPGiantColor
+                                h.FillTransparency = CheatState.ESPGiantFill
+                                h.OutlineTransparency = CheatState.ESPGiantOutline
+                            end
+                            -- Update distance
+                            local bb = child:FindFirstChild("GiantESPLabel")
+                            if bb then
+                                local distLbl = bb:FindFirstChild("GiantDist")
+                                if distLbl then
+                                    local myRoot = getRootPart()
+                                    local giantRoot = child:FindFirstChild("HumanoidRootPart") or child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart")
+                                    if myRoot and giantRoot then
+                                        local dist = math.floor((giantRoot.Position - myRoot.Position).Magnitude)
+                                        distLbl.Text = dist .. " studs"
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    else
+        disconnectKey("GiantESPLoop")
+        for _, child in pairs(Workspace:GetDescendants()) do
+            if child.Name == "GiantESPHighlight" or child.Name == "GiantESPLabel" then
+                pcall(function() child:Destroy() end)
+            end
+        end
+        clearGiantESP()
+    end
+    notify("Giant ESP", on and "ON - Monsters highlighted!" or "OFF")
+end)
+createColorPicker(visualPage, "Giant ESP Color", "ESPGiantColor")
+createFloatSlider(visualPage, "Giant Fill Transparency", 0, 1, 0.3, "ESPGiantFill")
+createFloatSlider(visualPage, "Giant Outline Transparency", 0, 1, 0, "ESPGiantOutline")
+createSectionLabel(visualPage, "VISUAL EFFECTS")
+createToggle(visualPage, "Fullbright", "Fullbright", function(on)
+    if on then
+        Lighting.Brightness = 2
+        Lighting.ClockTime = 14
+        Lighting.FogEnd = 100000
+        Lighting.GlobalShadows = false
+        Lighting.OutdoorAmbient = Color3.fromRGB(200, 200, 200)
+        Lighting.Ambient = Color3.fromRGB(200, 200, 200)
+        for _, child in pairs(Lighting:GetChildren()) do
+            if child:IsA("Atmosphere") then child.Density = 0 end
+            if child:IsA("BlurEffect") then child.Size = 0 end
+            if child:IsA("ColorCorrectionEffect") then child.Brightness = 0.1 child.Contrast = 0.1 end
+        end
+    else
+        Lighting.Brightness = 1
+        Lighting.GlobalShadows = true
+        Lighting.FogEnd = 500
+        Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+        Lighting.Ambient = Color3.fromRGB(0, 0, 0)
+        for _, child in pairs(Lighting:GetChildren()) do
+            if child:IsA("Atmosphere") then child.Density = 0.3 end
+        end
+    end
+    notify("Fullbright", on and "ON - See in the dark!" or "OFF")
+end)
+createToggle(visualPage, "No Fog", "NoFog", function(on)
+    if on then
+        Lighting.FogEnd = 999999
+        Lighting.FogStart = 999999
+        for _, child in pairs(Lighting:GetChildren()) do
+            if child:IsA("Atmosphere") then child.Density = 0 end
+        end
+    else
+        Lighting.FogEnd = 500
+        Lighting.FogStart = 0
+    end
+    notify("No Fog", on and "ON" or "OFF")
+end)
+createToggle(visualPage, "FOV Changer", "FOVChanger", function(on)
+    if on then
+        Camera.FieldOfView = CheatState.FOVValue
+        disconnectKey("FOV")
+        CheatState._connections["FOV"] = RunService.RenderStepped:Connect(function()
+            if CheatState.FOVChanger then Camera.FieldOfView = CheatState.FOVValue end
+        end)
+    else
+        disconnectKey("FOV")
+        Camera.FieldOfView = 70
+    end
+    notify("FOV", on and ("ON - FOV: " .. CheatState.FOVValue) or "OFF")
+end)
+createSlider(visualPage, "FOV Value", 30, 120, 90, "FOVValue", function(val)
+    if CheatState.FOVChanger then Camera.FieldOfView = val end
+end)
+createToggle(visualPage, "Third Person Lock", "ThirdPerson", function(on)
+    if on then
+        LocalPlayer.CameraMaxZoomDistance = 128
+        LocalPlayer.CameraMinZoomDistance = 15
+    else
+        LocalPlayer.CameraMaxZoomDistance = 128
+        LocalPlayer.CameraMinZoomDistance = 0.5
+    end
+    notify("Third Person", on and "ON - Zoomed out!" or "OFF")
+end)
+-- ================================================================
+--                     SERVER TAB (Server-Sided Cheats)
+-- ================================================================
+createSectionLabel(serverPage, "ANTI-CHEAT BYPASS")
+createToggle(serverPage, "Block Anti-Cheat (Detect Remote)", "SSAntiCheat", function(on)
+    if on then
+        disconnectKey("SSAntiCheat")
+        -- Method 1: Disconnect all existing connections on Detect
+        pcall(function()
+            local detect = Remotes:FindFirstChild("Detect")
+            if detect then
+                -- Try to hook/block using executor features
+                if hookfunction then
+                    -- Advanced: Hook the remote's FireServer
+                    local oldFire = detect.FireServer
+                    hookfunction(detect.FireServer, function(...)
+                        if CheatState.SSAntiCheat then
+                            return nil -- Block
+                        end
+                        return oldFire(...)
+                    end)
+                    notify("Anti-Cheat", "Detect remote hooked!")
+                end
+            end
+        end)
+        -- Method 2: Continuously block via connection intercept
+        CheatState._connections["SSAntiCheat"] = RunService.Heartbeat:Connect(function()
+            if CheatState.SSAntiCheat then
+                pcall(function()
+                    local detect = Remotes:FindFirstChild("Detect")
+                    if detect then
+                        -- Block by replacing with dummy
+                        -- Some executors support getconnections
+                        if getconnections then
+                            for _, conn in pairs(getconnections(detect.OnClientEvent)) do
+                                pcall(function() conn:Disable() end)
+                            end
+                        end
+                    end
+                end)
+            end
+        end)
+        notify("Anti-Cheat", "ON - Detect remote blocked!")
+    else
+        disconnectKey("SSAntiCheat")
+        -- Re-enable connections
+        pcall(function()
+            local detect = Remotes:FindFirstChild("Detect")
+            if detect and getconnections then
+                for _, conn in pairs(getconnections(detect.OnClientEvent)) do
+                    pcall(function() conn:Enable() end)
+                end
+            end
+        end)
+        notify("Anti-Cheat", "OFF - Protections re-enabled")
+    end
+end)
+createSectionLabel(serverPage, "SERVER-SIDED SPRINT")
+createToggle(serverPage, "SS Infinite Sprint", "SSSprint", function(on)
+    if on then
+        disconnectKey("SSSprint")
+        CheatState._connections["SSSprint"] = RunService.Heartbeat:Connect(function()
+            if CheatState.SSSprint then
+                pcall(function()
+                    local requestSprint = Remotes:FindFirstChild("RequestSprint")
+                    if requestSprint then
+                        requestSprint:FireServer(true)
+                    end
+                end)
+            end
+        end)
+        notify("SS Sprint", "ON - Server-side sprint active!")
+    else
+        disconnectKey("SSSprint")
+        pcall(function()
+            local requestSprint = Remotes:FindFirstChild("RequestSprint")
+            if requestSprint then requestSprint:FireServer(false) end
+        end)
+        notify("SS Sprint", "OFF")
+    end
+end)
+createSectionLabel(serverPage, "POINTS & COINS")
+createButton(serverPage, "📊 View Current Points", function()
+    pcall(function()
+        local viewPoints = Remotes:FindFirstChild("ViewPoints")
+        if viewPoints then
+            local points = viewPoints:Invoke()
+            notify("Points", "Current Points: " .. tostring(points), 5)
+        else
+            notify("Error", "ViewPoints remote not found")
+        end
+    end)
+end)
+createButton(serverPage, "💰 Add 100 Points", function()
+    pcall(function()
+        local addPoints = Remotes:FindFirstChild("AddPoints")
+        if addPoints then
+            addPoints:Fire(LocalPlayer, 100)
+            notify("Points", "Fired AddPoints(100)")
+        end
+    end)
+end)
+createButton(serverPage, "💰 Add 1000 Points", function()
+    pcall(function()
+        local addPoints = Remotes:FindFirstChild("AddPoints")
+        if addPoints then
+            addPoints:Fire(LocalPlayer, 1000)
+            notify("Points", "Fired AddPoints(1000)")
+        end
+    end)
+end)
+createButton(serverPage, "🪙 Add 100 Coins", function()
+    pcall(function()
+        local sendCoins = Remotes:FindFirstChild("SendNewCoins")
+        if sendCoins then
+            sendCoins:FireServer(100)
+            notify("Coins", "Fired SendNewCoins(100)")
+        end
+    end)
+end)
+createButton(serverPage, "🪙 Add 1000 Coins", function()
+    pcall(function()
+        local sendCoins = Remotes:FindFirstChild("SendNewCoins")
+        if sendCoins then
+            sendCoins:FireServer(1000)
+            notify("Coins", "Fired SendNewCoins(1000)")
+        end
+    end)
+end)
+createSectionLabel(serverPage, "SHOP EXPLOITS")
+createButton(serverPage, "🛒 Dump Shop Info", function()
+    pcall(function()
+        local getShop = Remotes:FindFirstChild("GetShopInfo")
+        if getShop then
+            local shopData = getShop:InvokeServer()
+            if shopData then
+                print("[CHEAT MENU] ===== SHOP DATA =====")
+                for k, v in pairs(shopData) do
+                    print("  " .. tostring(k) .. " = " .. tostring(v))
+                    if type(v) == "table" then
+                        for k2, v2 in pairs(v) do
+                            print("    " .. tostring(k2) .. " = " .. tostring(v2))
+                        end
+                    end
+                end
+                notify("Shop", "Shop data dumped to console (F9)", 5)
+            else
+                notify("Shop", "No data returned")
+            end
+        end
+    end)
+end)
+createButton(serverPage, "🛒 Try Free Purchase (Item 1)", function()
+    pcall(function()
+        local reqPurchase = Remotes:FindFirstChild("RequestPurchase")
+        if reqPurchase then
+            local result = reqPurchase:InvokeServer(1)
+            notify("Shop", "Purchase result: " .. tostring(result), 5)
+        end
+    end)
+end)
+createButton(serverPage, "🛒 Try Free Purchase (Item 2)", function()
+    pcall(function()
+        local reqPurchase = Remotes:FindFirstChild("RequestPurchase")
+        if reqPurchase then
+            local result = reqPurchase:InvokeServer(2)
+            notify("Shop", "Purchase result: " .. tostring(result), 5)
+        end
+    end)
+end)
+createButton(serverPage, "👕 Equip Item 1", function()
+    pcall(function()
+        local reqEquip = Remotes:FindFirstChild("RequestEquip")
+        if reqEquip then
+            local result = reqEquip:InvokeServer(1)
+            notify("Equip", "Result: " .. tostring(result), 5)
+        end
+    end)
+end)
+createButton(serverPage, "👕 Equip Item 2", function()
+    pcall(function()
+        local reqEquip = Remotes:FindFirstChild("RequestEquip")
+        if reqEquip then
+            local result = reqEquip:InvokeServer(2)
+            notify("Equip", "Result: " .. tostring(result), 5)
+        end
+    end)
+end)
+createSectionLabel(serverPage, "MONSTER REMOTE CONTROL")
+createButton(serverPage, "🐕 Force Monster Chase (Follow Remote)", function()
+    pcall(function()
+        local monster = getMonster()
+        if monster then
+            local dogServer = monster:FindFirstChild("DogServer")
+            if dogServer then
+                local follow = dogServer:FindFirstChild("Follow")
+                if follow then
+                    local remote = follow:FindFirstChild("RemoteEvent")
+                    if remote then
+                        -- Fire follow with our character as target
+                        remote:FireServer(LocalPlayer.Character)
+                        notify("Monster", "Fired Follow remote!")
+                    end
+                end
+            end
+        else
+            notify("Error", "No monster found!")
+        end
+    end)
+end)
+createButton(serverPage, "💥 Fire Monster HitBox Callback", function()
+    pcall(function()
+        local monster = getMonster()
+        if monster then
+            local dogServer = monster:FindFirstChild("DogServer")
+            if dogServer then
+                local hitbox = dogServer:FindFirstChild("HitBoxCallback")
+                if hitbox then
+                    local event = hitbox:FindFirstChild("Event")
+                    if event then
+                        event:FireServer()
+                        notify("Monster", "Fired HitBoxCallback!")
+                    end
+                end
+            end
+        else
+            notify("Error", "No monster found!")
+        end
+    end)
+end)
+createButton(serverPage, "🔨 Fire Monster Hit (hitb)", function()
+    pcall(function()
+        local monster = getMonster()
+        if monster then
+            local dogServer = monster:FindFirstChild("DogServer")
+            if dogServer then
+                local hitb = dogServer:FindFirstChild("hitb")
+                if hitb then
+                    local remote = hitb:FindFirstChild("RemoteEvent")
+                    if remote then
+                        remote:FireServer()
+                        notify("Monster", "Fired hitb remote!")
+                    end
+                end
+            end
+        else
+            notify("Error", "No monster found!")
+        end
+    end)
+end)
+createButton(serverPage, "🔨 Fire Monster Hit2 (hitb2)", function()
+    pcall(function()
+        local monster = getMonster()
+        if monster then
+            local dogServer = monster:FindFirstChild("DogServer")
+            if dogServer then
+                local hitb2 = dogServer:FindFirstChild("hitb2")
+                if hitb2 then
+                    local remote = hitb2:FindFirstChild("RemoteEvent")
+                    if remote then
+                        remote:FireServer()
+                        notify("Monster", "Fired hitb2 remote!")
+                    end
+                end
+            end
+        else
+            notify("Error", "No monster found!")
+        end
+    end)
+end)
+createSectionLabel(serverPage, "GAME STATE MANIPULATION")
+createButton(serverPage, "🔔 Fire YourTheMonster (Force Giant)", function()
+    pcall(function()
+        local remote = Remotes:FindFirstChild("YourTheMonster")
+        if remote then
+            remote:FireServer()
+            notify("Game", "Fired YourTheMonster remote!")
+        end
+    end)
+end)
+createButton(serverPage, "👤 Fire YourTheSurvivor", function()
+    pcall(function()
+        local remote = Remotes:FindFirstChild("YourTheSurvivor")
+        if remote then
+            remote:FireServer()
+            notify("Game", "Fired YourTheSurvivor remote!")
+        end
+    end)
+end)
+createButton(serverPage, "⏰ Fire Last45Second", function()
+    pcall(function()
+        local remote = Remotes:FindFirstChild("Last45Second")
+        if remote then
+            remote:FireServer()
+            notify("Game", "Fired Last45Second remote!")
+        end
+    end)
+end)
+createSectionLabel(serverPage, "KOHL'S ADMIN EXPLOIT")
+createButton(serverPage, "🔑 Try Kohl's Admin Command Fire", function()
+    pcall(function()
+        local kohls = ReplicatedStorage:FindFirstChild("Kohl's Admin Source")
+        if kohls then
+            local shared = kohls:FindFirstChild("Shared")
+            if shared then
+                local util = shared:FindFirstChild("Util")
+                if util then
+                    local remote = util:FindFirstChild("Remote")
+                    if remote then
+                        local re = remote:FindFirstChild("RemoteEvent")
+                        if re then
+                            -- Try firing with a speed command payload
+                            re:FireServer("speed", {LocalPlayer, 100})
+                            notify("Kohl's", "Fired Kohl's RemoteEvent!")
+                        end
+                        local rf = remote:FindFirstChild("RemoteFunction")
+                        if rf then
+                            local result = rf:InvokeServer("speed", {LocalPlayer, 100})
+                            notify("Kohl's", "Invoked Kohl's RemoteFunction! Result: " .. tostring(result))
+                        end
+                    end
+                end
+            end
+        else
+            notify("Error", "Kohl's Admin not found!")
+        end
+    end)
+end)
+createButton(serverPage, "🔑 Try Kohl's God Mode", function()
+    pcall(function()
+        local kohls = ReplicatedStorage:FindFirstChild("Kohl's Admin Source")
+        if kohls then
+            local shared = kohls:FindFirstChild("Shared")
+            if shared then
+                local util = shared:FindFirstChild("Util")
+                if util then
+                    local remote = util:FindFirstChild("Remote")
+                    if remote then
+                        local re = remote:FindFirstChild("RemoteEvent")
+                        if re then
+                            re:FireServer("god", {LocalPlayer})
+                            notify("Kohl's", "Fired god command!")
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end)
+createButton(serverPage, "📡 Fire All Remotes (Shotgun)", function()
+    pcall(function()
+        for _, remote in pairs(Remotes:GetChildren()) do
+            pcall(function()
+                if remote:IsA("RemoteEvent") then
+                    remote:FireServer()
+                end
+            end)
+        end
+        notify("Shotgun", "Fired all RemoteEvents in Remotes folder!")
+    end)
+end)
+-- ================================================================
+--                     UTILITY TAB
+-- ================================================================
+createSectionLabel(utilPage, "TELEPORTATION")
+createButton(utilPage, "🏠 Teleport to Lobby Spawn", function()
+    local rootPart = getRootPart()
+    if not rootPart then return end
+    local lobby = Workspace:FindFirstChild("NewLobby")
+    if lobby then
+        local spawn = lobby:FindFirstChild("SpawnLocation")
+        if spawn then
+            rootPart.CFrame = spawn.CFrame + Vector3.new(0, 5, 0)
+            notify("Teleport", "Teleported to lobby!")
+            return
+        end
+    end
+    rootPart.CFrame = CFrame.new(0, 50, 0)
+    notify("Teleport", "Teleported to lobby area!")
+end)
+createButton(utilPage, "🗺 Teleport to Map Spawn", function()
+    local rootPart = getRootPart()
+    if not rootPart then return end
+    local map = Workspace:FindFirstChild("RevampedForestMap")
+    if map then
+        local spawns = map:FindFirstChild("Spawn")
+        if spawns then
+            local spawnParts = spawns:GetChildren()
+            if #spawnParts > 0 then
+                local s = spawnParts[math.random(1, #spawnParts)]
+                if s:IsA("BasePart") then
+                    rootPart.CFrame = s.CFrame + Vector3.new(0, 5, 0)
+                    notify("Teleport", "Teleported to map spawn!")
+                    return
+                end
+            end
+        end
+    end
+    notify("Error", "Map spawns not found - game in lobby?")
+end)
+createButton(utilPage, "👤 Teleport to First Other Player", function()
+    local others = getAllPlayers()
+    if #others == 0 then notify("Error", "No other players!") return end
+    local target = others[1]
+    if target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+        local rootPart = getRootPart()
+        if rootPart then
+            rootPart.CFrame = target.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -5)
+            notify("Teleport", "TP to " .. target.Name)
+        end
+    end
+end)
+createSectionLabel(utilPage, "GAME INFO")
+createButton(utilPage, "📊 Print Game State (Console)", function()
+    local intermission = CurrentStats:FindFirstChild("Intermission")
+    local time = CurrentStats:FindFirstChild("Time")
+    local intTime = CurrentStats:FindFirstChild("IntermissionTime")
+    local private = CurrentStats:FindFirstChild("Private")
+    local msg = "Intermission: " .. tostring(intermission and intermission.Value) ..
+        "\nTime: " .. tostring(time and time.Value) ..
+        "\nInt.Time: " .. tostring(intTime and intTime.Value) ..
+        "\nPrivate: " .. tostring(private and private.Value)
+    notify("Game State", msg, 5)
+    print("[CHEAT MENU] Game State:")
+    print(msg)
+end)
+createButton(utilPage, "📍 Print All Player Positions", function()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local pos = player.Character.HumanoidRootPart.Position
+            print(player.Name .. ": " .. math.floor(pos.X) .. ", " .. math.floor(pos.Y) .. ", " .. math.floor(pos.Z))
+        end
+    end
+    notify("Positions", "Printed to console (F9)")
+end)
+createButton(utilPage, "👹 Print Monster Location", function()
+    local monster = getMonster()
+    if monster then
+        local root = monster:FindFirstChild("HumanoidRootPart") or monster.PrimaryPart or monster:FindFirstChildWhichIsA("BasePart")
+        if root then
+            local pos = root.Position
+            notify("Monster", "Pos: " .. math.floor(pos.X) .. ", " .. math.floor(pos.Y) .. ", " .. math.floor(pos.Z), 5)
+        else
+            notify("Monster", "Found model but no root part!")
+        end
+    else
+        notify("Monster", "No monster found in workspace!")
+    end
+end)
+createSectionLabel(utilPage, "CHARACTER")
+createButton(utilPage, "💀 Reset Character", function()
+    local humanoid = getHumanoid()
+    if humanoid then humanoid.Health = 0 end
+end)
+createButton(utilPage, "💾 Save Position", function()
+    local rootPart = getRootPart()
+    if rootPart then
+        CheatState._savedPosition = rootPart.CFrame
+        notify("Position", "Position saved!")
+    end
+end)
+createButton(utilPage, "📂 Load Position", function()
+    if CheatState._savedPosition then
+        local rootPart = getRootPart()
+        if rootPart then
+            rootPart.CFrame = CheatState._savedPosition
+            notify("Position", "Position loaded!")
+        end
+    else
+        notify("Error", "No position saved!")
+    end
+end)
+createSectionLabel(utilPage, "REMOTE DEBUGGING")
+createButton(utilPage, "🔍 List All Game Remotes", function()
+    print("[CHEAT MENU] ===== ALL REMOTES =====")
+    for _, remote in pairs(Remotes:GetChildren()) do
+        print("  [" .. remote.ClassName .. "] " .. remote.Name)
+    end
+    -- Also check monster
+    local monster = getMonster()
+    if monster then
+        local dogServer = monster:FindFirstChild("DogServer")
+        if dogServer then
+            print("[CHEAT MENU] ===== MONSTER REMOTES =====")
+            for _, child in pairs(dogServer:GetDescendants()) do
+                if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
+                    print("  [" .. child.ClassName .. "] " .. child:GetFullName())
+                end
+            end
+        end
+    end
+    notify("Remotes", "Listed in console (F9)", 5)
+end)
+createButton(utilPage, "🔍 Dump Workspace Structure", function()
+    print("[CHEAT MENU] ===== WORKSPACE CHILDREN =====")
+    for _, child in pairs(Workspace:GetChildren()) do
+        print("  [" .. child.ClassName .. "] " .. child.Name .. " (children: " .. #child:GetChildren() .. ")")
+    end
+    notify("Workspace", "Dumped to console (F9)", 5)
+end)
+-- ================================================================
+--                     TOGGLE MENU KEYBIND
+-- ================================================================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.RightShift then
+        MainFrame.Visible = not MainFrame.Visible
+    end
+end)
+-- ================================================================
+--                     AUTO-REAPPLY ON RESPAWN
+-- ================================================================
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(1)
+    -- Speed hack
+    if CheatState.SpeedHack then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = CheatState.SpeedValue end
+    end
+    -- Giant speed
+    if CheatState.GiantSpeed then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = CheatState.GiantSpeedValue end
+    end
+    -- Player ESP
+    if CheatState.PlayerESP then
+        clearESP()
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then createESP(player) end
+        end
+    end
+    -- Fullbright
+    if CheatState.Fullbright then
+        Lighting.Brightness = 2
+        Lighting.ClockTime = 14
+        Lighting.FogEnd = 100000
+        Lighting.GlobalShadows = false
+    end
+    -- Jump boost
+    if CheatState.JumpBoost then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            if hum.UseJumpPower then
+                hum.JumpPower = 100
+            else
+                hum.JumpHeight = 20
+            end
+        end
+    end
+    -- Flashlight range (re-apply after respawn, will pick up new tool)
+    if CheatState.FlashlightRange then
+        task.wait(2) -- Wait for tools to be given
+        -- The heartbeat loop will automatically apply to new tools
+    end
+end)
+-- ================================================================
+--                     STARTUP
+-- ================================================================
+notify("Lurking Giants v2.0", "Menu loaded! Press RIGHT SHIFT to toggle.\n5 tabs: Survivor, Giant, Visual, Server, Utility", 5)
+print("═══════════════════════════════════════════════════")
+print("  LURKING GIANTS CHEAT MENU v2.0 LOADED")
+print("  Press RIGHT SHIFT to toggle menu")
+print("  5 Tabs: Survivor | Giant | Visual | Server | Utility")
+print("  NEW: Server-Sided Cheats | Configurable ESP | Replicated Flashlight")
+print("  Built by Antigravity from decompiled game data")
+print("═══════════════════════════════════════════════════")
